@@ -1,0 +1,25 @@
+# Crowded runtime
+/.crowded/
+
+# Rust build output
+/target/
+
+# Local agent and indexing state
+/.agents/
+/.claude/
+/.cocoindex_code/
+/.code4me/
+/.codegraph/
+/.codex/
+/.mcp.json
+/.opencode/
+/basic-memory/
+/crowded.toml
+/opencode.json
+/token_pricing.toml
+
+# Local validation captures
+/screenshots/
+
+# macOS
+.DS_Store

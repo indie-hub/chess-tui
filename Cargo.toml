@@ -1,0 +1,13 @@
+[package]
+name = "chess-tui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ratatui = "0.30"
+crossterm = "0.29"
+shakmaty = "0.30"
+
+[dev-dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+sha2 = "0.10"
