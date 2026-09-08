@@ -7,17 +7,22 @@ local two-player game.
 
 ## Run
 
-Install a current stable Rust toolchain, fetch the verified Stockfish binary,
-then run from this directory:
+Install a current stable Rust toolchain, then run from this directory:
 
 ```sh
-bash scripts/fetch-stockfish.sh
 cargo run --locked
 ```
 
-A plain `cargo run --locked` automatically finds the staged engine binary at
-`third_party/stockfish/bundle/stockfish-macos-universal` inside the source
-tree. Set `STOCKFISH_PATH` to override it for a custom binary.
+On macOS or Windows (x86-64 or arm64), the first run automatically fetches,
+SHA-256-verifies, and stages the pinned Stockfish binary (roughly 80-105 MB,
+one-time) before starting; later runs find the already-staged binary with no
+network access. To pre-fetch on macOS (for example on a machine without
+network access at launch time, or in CI), run `bash scripts/fetch-stockfish.sh`
+yourself first; it uses the same pin (there is no Windows equivalent script,
+since the automatic fetch already covers Windows at runtime). Set
+`STOCKFISH_PATH` to override with a custom binary on any platform. On any
+other platform there is no verified pin yet, so the app falls back straight
+to a local two-player game.
 
 Use a terminal with at least **170 columns and 68 rows**. Smaller windows show a
 resize prompt with the current size and pause game input. Without an engine the
@@ -83,18 +88,39 @@ test verifies the static pixel data matches the vendored PNGs byte for byte.
 
 ## Stockfish
 
-`scripts/fetch-stockfish.sh` downloads a pinned, SHA-256-verified macOS
-universal Stockfish binary into the source tree. The binary itself is
-gitignored staging (`third_party/stockfish/bundle/`); the pin, license and
-source pointer stay tracked under `third_party/stockfish/`. No packaged
-release exists yet: a future distributable archive or `.app` must place
-`stockfish` beside the executable and ship the GPL files from that directory.
-
 Engine lookup order: `STOCKFISH_PATH` (environment override), then an
-executable-sibling `stockfish` for packaged builds, then the staged source-tree
-binary at `third_party/stockfish/bundle/stockfish-macos-universal` for
-cargo/source runs. `PATH` is never consulted and nothing is downloaded at
-runtime. Engine moves are validated for legality before they are played.
+executable-sibling `stockfish` (`stockfish.exe` on Windows) for packaged
+builds, then the staged source-tree binary under
+`third_party/stockfish/bundle/` for cargo/source runs. `PATH` is never
+consulted. Engine moves are validated for legality before they are played.
+
+If none of those is found and the platform has a verified pin (macOS,
+Windows x86-64, Windows arm64), `src/fetch.rs` fetches, SHA-256-verifies,
+extracts, and stages the matching pinned Stockfish binary into that same
+source-tree path before the lookup runs again — a plain `cargo run` plays
+against the engine with no manual step. This is a Rust port of
+`scripts/fetch-stockfish.sh`'s download/verify/stage logic (kept in sync with
+`third_party/stockfish/manifest.json`, guarded by a test), so a packaged
+binary doesn't depend on the shell script being present. Every pin shells out
+to the same trusted system tools (`curl`, `tar`) for downloading and
+extracting instead of adding new crate dependencies for that, and never
+executes the binary as part of verifying it; hashing itself uses the `sha2`
+crate directly rather than a platform tool, since `shasum` (macOS) and
+`certutil`/PowerShell (Windows) would otherwise need separate, locale-
+sensitive output parsing. `scripts/fetch-stockfish.sh` stays available for
+pre-fetching on macOS (for example on a machine without network access at
+launch time, or in CI); there is no Windows equivalent script, since the
+automatic Rust fetch already gives Windows the same first-run convenience.
+
+The binaries themselves are gitignored staging (`third_party/stockfish/bundle/`);
+the pins, license and source pointer stay tracked under `third_party/stockfish/`.
+No packaged release exists yet: a future distributable archive, `.app`, or
+Windows installer must place the engine beside the executable and ship the
+GPL files from that directory — auto-fetch only covers the cargo/source-tree
+path, not that case.
+
+On any platform without a verified pin, the app skips fetching entirely and
+falls back to the existing local two-player notice.
 
 ## Rules
 

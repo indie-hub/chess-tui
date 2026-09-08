@@ -13,6 +13,7 @@ use ratatui::{Terminal, backend::TestBackend, style::Color};
 use sha2::{Digest, Sha256};
 use shakmaty::{CastlingMode, Chess, Position, Role, Square, fen::Fen, uci::UciMove};
 use std::collections::HashSet;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::Mutex;
@@ -1279,6 +1280,8 @@ fn engine_lookup_override_takes_precedence() {
         Some("/custom/stockfish"),
         Some(&root.join("bin")),
         &root.join("src"),
+        "stockfish",
+        "stockfish-macos-universal",
     );
     assert_eq!(
         resolved,
@@ -1289,6 +1292,8 @@ fn engine_lookup_override_takes_precedence() {
         Some("/nonexistent/stockfish"),
         Some(&root.join("bin")),
         &root.join("src"),
+        "stockfish",
+        "stockfish-macos-universal",
     );
     assert_eq!(
         resolved,
@@ -1301,8 +1306,13 @@ fn engine_lookup_override_takes_precedence() {
 fn engine_lookup_sibling_before_staged() {
     let root = engine_lookup_root();
     engine_lookup_temp_tree(&root, true, true);
-    let resolved =
-        crate::engine::resolve_engine_path_from(None, Some(&root.join("bin")), &root.join("src"));
+    let resolved = crate::engine::resolve_engine_path_from(
+        None,
+        Some(&root.join("bin")),
+        &root.join("src"),
+        "stockfish",
+        "stockfish-macos-universal",
+    );
     assert_eq!(resolved, Some(root.join("bin/stockfish")));
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -1311,8 +1321,13 @@ fn engine_lookup_sibling_before_staged() {
 fn engine_lookup_staged_source_tree_when_no_sibling() {
     let root = engine_lookup_root();
     engine_lookup_temp_tree(&root, false, true);
-    let resolved =
-        crate::engine::resolve_engine_path_from(None, Some(&root.join("bin")), &root.join("src"));
+    let resolved = crate::engine::resolve_engine_path_from(
+        None,
+        Some(&root.join("bin")),
+        &root.join("src"),
+        "stockfish",
+        "stockfish-macos-universal",
+    );
     assert_eq!(
         resolved,
         Some(root.join("src/third_party/stockfish/bundle/stockfish-macos-universal"))
@@ -1324,8 +1339,13 @@ fn engine_lookup_staged_source_tree_when_no_sibling() {
 fn engine_lookup_missing_paths_return_none() {
     let root = engine_lookup_root();
     engine_lookup_temp_tree(&root, false, false);
-    let resolved =
-        crate::engine::resolve_engine_path_from(None, Some(&root.join("bin")), &root.join("src"));
+    let resolved = crate::engine::resolve_engine_path_from(
+        None,
+        Some(&root.join("bin")),
+        &root.join("src"),
+        "stockfish",
+        "stockfish-macos-universal",
+    );
     assert_eq!(resolved, None);
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -1333,11 +1353,186 @@ fn engine_lookup_missing_paths_return_none() {
 #[test]
 fn engine_real_lookup_finds_staged_source_tree_binary() {
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let resolved = crate::engine::resolve_engine_path_from(None, None, &manifest);
+    let resolved = crate::engine::resolve_engine_path_from(
+        None,
+        None,
+        &manifest,
+        "stockfish",
+        "stockfish-macos-universal",
+    );
     assert_eq!(
         resolved,
         Some(manifest.join("third_party/stockfish/bundle/stockfish-macos-universal"))
     );
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn fetch_pin_matches_tracked_manifest() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest_json =
+        std::fs::read_to_string(manifest_dir.join("third_party/stockfish/manifest.json")).unwrap();
+    for pin in [
+        &crate::fetch::STOCKFISH_19_MACOS,
+        &crate::fetch::STOCKFISH_19_WINDOWS_X86_64,
+        &crate::fetch::STOCKFISH_19_WINDOWS_ARM64,
+    ] {
+        assert!(manifest_json.contains(pin.archive_url));
+        assert!(manifest_json.contains(pin.archive_sha256));
+        assert!(manifest_json.contains(pin.executable_sha256));
+        assert!(manifest_json.contains(pin.executable_in_archive));
+        assert!(manifest_json.contains(&pin.archive_size.to_string()));
+        assert!(manifest_json.contains(&pin.executable_size.to_string()));
+    }
+}
+
+// The real bundle is already staged on this dev machine (it is what
+// engine_real_lookup_finds_staged_source_tree_binary relies on too), so this
+// exercises ensure_staged_in's idempotent fast path with real production
+// data and no network access: a bundle that already matches the pin is
+// returned immediately.
+#[test]
+#[cfg(target_os = "macos")]
+fn fetch_real_bundle_matches_pin_and_short_circuits() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let expected = manifest_dir.join("third_party/stockfish/bundle/stockfish-macos-universal");
+    if !expected.is_file() {
+        return; // not staged on this machine (e.g. a clean checkout); covered by the pipeline test below instead.
+    }
+    let resolved = crate::fetch::ensure_staged_in(&manifest_dir, &crate::fetch::STOCKFISH_19_MACOS);
+    assert_eq!(resolved.unwrap(), expected);
+}
+
+// Builds a local, non-network archive (via `tar` and a `file://` URL) whose
+// executable entry is engineered to match a fixture pin's own size/sha256,
+// then drives the full download/extract/verify pipeline against it. The
+// fixture bytes are not a real Mach-O binary, so this proves the
+// architecture check rejects it even though the hash/size checks pass, and
+// that nothing gets staged into the bundle directory when that happens.
+#[test]
+#[cfg(target_os = "macos")]
+fn fetch_rejects_non_universal_binary_via_local_archive() {
+    let root = engine_lookup_root();
+    let src_dir = root.join("src_archive");
+    let exe_rel = "stockfish/stockfish-macos-universal";
+    std::fs::create_dir_all(src_dir.join("stockfish")).unwrap();
+    let fake_exe_bytes = b"not a real stockfish binary; fetch pipeline test fixture only";
+    std::fs::write(src_dir.join(exe_rel), fake_exe_bytes).unwrap();
+
+    let archive_path = root.join("fixture.tar.gz");
+    let status = std::process::Command::new("tar")
+        .arg("-C")
+        .arg(&src_dir)
+        .arg("-czf")
+        .arg(&archive_path)
+        .arg("stockfish")
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let archive_size = std::fs::metadata(&archive_path).unwrap().len();
+    let archive_sha256 = crate::fetch::sha256_file(&archive_path).unwrap();
+    let exe_size = fake_exe_bytes.len() as u64;
+    let exe_sha256 = crate::fetch::sha256_file(&src_dir.join(exe_rel)).unwrap();
+
+    let archive_url: &'static str =
+        Box::leak(format!("file://{}", archive_path.display()).into_boxed_str());
+    let pin = crate::fetch::Pin {
+        archive_url,
+        archive_format: crate::fetch::ArchiveFormat::TarGz,
+        archive_size,
+        archive_sha256: Box::leak(archive_sha256.into_boxed_str()),
+        executable_in_archive: exe_rel,
+        executable_size: exe_size,
+        executable_sha256: Box::leak(exe_sha256.into_boxed_str()),
+        staged_name: "stockfish-macos-universal",
+    };
+
+    let manifest_dir = root.join("manifest");
+    let result = crate::fetch::ensure_staged_in(&manifest_dir, &pin);
+    match result {
+        Err(crate::fetch::FetchError::Verify(msg)) => {
+            assert!(
+                msg.contains("universal binary"),
+                "expected a universal-binary rejection, got: {msg}"
+            );
+        }
+        other => panic!("expected the non-Mach-O fixture to be rejected, got {other:?}"),
+    }
+    let bundle_exe = manifest_dir.join("third_party/stockfish/bundle/stockfish-macos-universal");
+    assert!(
+        !bundle_exe.is_file(),
+        "a fixture that fails the architecture check must never be staged"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+// Same as fetch_rejects_non_universal_binary_via_local_archive but through
+// the ArchiveFormat::Zip path used for the Windows pins, proving `tar -xf`
+// (the same bsdtar binary Windows 10 1803+/11 ships) correctly extracts a
+// .zip archive too. This machine still runs the macOS-specific
+// verify_universal_binary check (verify_universal_binary is gated on the
+// build target, not on which pin is in play), so the fixture is still
+// rejected there for the same reason as the tar.gz test; the point of this
+// test is exercising the Zip extraction branch itself, not the Windows
+// executable-format check (which has no automated equivalent, see
+// verify_universal_binary's doc comment).
+#[test]
+#[cfg(target_os = "macos")]
+fn fetch_extracts_zip_archives_too() {
+    let root = engine_lookup_root();
+    let src_dir = root.join("src_archive");
+    let exe_rel = "stockfish/stockfish-windows-x86-64-universal.exe";
+    std::fs::create_dir_all(src_dir.join("stockfish")).unwrap();
+    let fake_exe_bytes = b"not a real stockfish binary; zip pipeline test fixture only";
+    std::fs::write(src_dir.join(exe_rel), fake_exe_bytes).unwrap();
+
+    let archive_path = root.join("fixture.zip");
+    let status = std::process::Command::new("zip")
+        .arg("-r")
+        .arg("-q")
+        .arg(&archive_path)
+        .arg("stockfish")
+        .current_dir(&src_dir)
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let archive_size = std::fs::metadata(&archive_path).unwrap().len();
+    let archive_sha256 = crate::fetch::sha256_file(&archive_path).unwrap();
+    let exe_size = fake_exe_bytes.len() as u64;
+    let exe_sha256 = crate::fetch::sha256_file(&src_dir.join(exe_rel)).unwrap();
+
+    let archive_url: &'static str =
+        Box::leak(format!("file://{}", archive_path.display()).into_boxed_str());
+    let pin = crate::fetch::Pin {
+        archive_url,
+        archive_format: crate::fetch::ArchiveFormat::Zip,
+        archive_size,
+        archive_sha256: Box::leak(archive_sha256.into_boxed_str()),
+        executable_in_archive: exe_rel,
+        executable_size: exe_size,
+        executable_sha256: Box::leak(exe_sha256.into_boxed_str()),
+        staged_name: "stockfish-windows-x86-64-universal.exe",
+    };
+
+    let manifest_dir = root.join("manifest");
+    let result = crate::fetch::ensure_staged_in(&manifest_dir, &pin);
+    // The zip extracted and both hash checks passed (otherwise this would be
+    // a Download/Extract error instead); only the macOS-only architecture
+    // check rejects this non-Mach-O fixture.
+    match result {
+        Err(crate::fetch::FetchError::Verify(msg)) => {
+            assert!(
+                msg.contains("universal binary"),
+                "expected extraction+hashing to succeed and only the architecture check to fail, got: {msg}"
+            );
+        }
+        other => panic!("expected the non-Mach-O fixture to be rejected, got {other:?}"),
+    }
+
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -1370,6 +1565,10 @@ fn engine_switch_sides_toggles_and_restarts() {
     assert_eq!(game.position, Chess::default());
 }
 
+// Windows has no unix-style executable permission bit to unset, so this
+// fixture and the assertion it feeds are unix-only; see
+// assert_nonexecutable_file_is_refused below.
+#[cfg(unix)]
 fn temp_nonexecutable() -> std::path::PathBuf {
     let dir = std::env::temp_dir();
     let path = dir.join(format!("fake_engine_noexec_{}", std::process::id()));
@@ -1379,6 +1578,19 @@ fn temp_nonexecutable() -> std::path::PathBuf {
     std::fs::set_permissions(&path, perms).unwrap();
     path
 }
+
+#[cfg(unix)]
+fn assert_nonexecutable_file_is_refused() {
+    let path = temp_nonexecutable();
+    let err = crate::engine::Engine::spawn(&path)
+        .err()
+        .expect("spawn error");
+    assert!(!err.message().is_empty());
+    let _ = std::fs::remove_file(&path);
+}
+
+#[cfg(not(unix))]
+fn assert_nonexecutable_file_is_refused() {}
 
 fn engine_lookup_root() -> std::path::PathBuf {
     static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -1407,12 +1619,7 @@ fn engine_missing_and_nonexecutable_are_graceful_errors() {
     // Missing path: spawn fails.
     assert!(crate::engine::Engine::spawn(Path::new("/nonexistent/stockfish")).is_err());
     // Non-executable file: spawn is refused.
-    let path = temp_nonexecutable();
-    let err = crate::engine::Engine::spawn(&path)
-        .err()
-        .expect("spawn error");
-    assert!(!err.message().is_empty());
-    let _ = std::fs::remove_file(&path);
+    assert_nonexecutable_file_is_refused();
 }
 
 #[test]

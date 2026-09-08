@@ -19,6 +19,15 @@ releases yet, so everything so far is grouped under Unreleased.
 - Stockfish integration: a pinned, SHA-256-verified binary fetch script
   (`scripts/fetch-stockfish.sh`), subprocess UCI play against the engine,
   and legality validation of engine moves before they are played.
+- Automatic first-run fetch, verification, and staging of the Stockfish
+  binary on macOS, Windows x86-64, and Windows arm64 (`src/fetch.rs`), so
+  `cargo run` alone can play against the engine with no manual step;
+  `scripts/fetch-stockfish.sh` remains available for manual pre-fetch on
+  macOS.
+- GPL-3.0-or-later licensing: `LICENSE`, `SPDX-License-Identifier` headers
+  on all first-party source, vendored license text for the `shakmaty` and
+  Stockfish GPL dependencies, and CC0 attribution for the SpicyGame sprite
+  pack.
 - New-game configuration screen (`n`): choose White, Black, or a random
   side, and set Stockfish Skill Level (0-20); the board orients to the
   human player's side.
@@ -29,10 +38,6 @@ releases yet, so everything so far is grouped under Unreleased.
   decoded ahead of time into static RGBA data with no runtime image
   dependency.
 - Resize prompt for terminals smaller than 170x68.
-- GPL-3.0-or-later licensing: `LICENSE`, `SPDX-License-Identifier` headers
-  on all first-party source, vendored license text for the `shakmaty` and
-  Stockfish GPL dependencies, and CC0 attribution for the SpicyGame sprite
-  pack.
 
 ### Changed
 

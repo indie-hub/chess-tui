@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 mod engine;
+mod fetch;
 mod game;
 mod input;
 mod render;
@@ -122,6 +123,12 @@ fn drive_engine(engine: &mut Engine, game: &mut Game) {
 }
 
 fn main() -> io::Result<()> {
+    if engine::resolve_engine_path().is_none()
+        && fetch::is_supported_platform()
+        && let Err(err) = fetch::ensure_staged()
+    {
+        eprintln!("[chess] Stockfish fetch failed: {err} (continuing without engine)");
+    }
     let mut engine = match engine::start() {
         Ok(engine) => Some(engine),
         Err(err) => {

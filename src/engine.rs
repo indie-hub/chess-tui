@@ -50,12 +50,12 @@ pub(crate) struct Engine {
     last_fen: Option<String>,
 }
 
-// Locate the engine: STOCKFISH_PATH overrides, otherwise a stockfish binary
-// sitting next to the running executable. No PATH lookup.
 // Locate the engine in this order: a non-empty STOCKFISH_PATH override, an
-// executable-sibling stockfish for packaged builds, then the source-tree
-// staged binary below the crate manifest for cargo/source runs. No PATH
-// lookup and no automatic network download.
+// executable-sibling stockfish (stockfish.exe on Windows) for packaged
+// builds, then the source-tree staged binary below the crate manifest for
+// cargo/source runs. No PATH lookup. This function only looks; it never
+// downloads. On a supported platform, main() calls fetch::ensure_staged() to
+// stage that source-tree binary before trying this lookup a second time.
 pub(crate) fn resolve_engine_path() -> Option<PathBuf> {
     let override_path = std::env::var("STOCKFISH_PATH")
         .ok()
@@ -64,24 +64,48 @@ pub(crate) fn resolve_engine_path() -> Option<PathBuf> {
         .ok()
         .and_then(|exe| exe.parent().map(|p| p.to_path_buf()));
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    resolve_engine_path_from(override_path.as_deref(), exe_dir.as_deref(), &manifest_dir)
+    // An empty staged_name can never match a real file, so a platform with
+    // no verified fetch pin correctly falls through to just the override and
+    // sibling-binary checks below.
+    let staged_name = crate::fetch::staged_binary_name().unwrap_or("");
+    resolve_engine_path_from(
+        override_path.as_deref(),
+        exe_dir.as_deref(),
+        &manifest_dir,
+        sibling_binary_name(),
+        staged_name,
+    )
+}
+
+#[cfg(windows)]
+fn sibling_binary_name() -> &'static str {
+    "stockfish.exe"
+}
+
+#[cfg(not(windows))]
+fn sibling_binary_name() -> &'static str {
+    "stockfish"
 }
 
 pub(crate) fn resolve_engine_path_from(
     override_path: Option<&str>,
     exe_dir: Option<&Path>,
     manifest_dir: &Path,
+    sibling_name: &str,
+    staged_name: &str,
 ) -> Option<PathBuf> {
     if let Some(path) = override_path {
         return Some(PathBuf::from(path));
     }
     if let Some(exe) = exe_dir {
-        let sibling = exe.join("stockfish");
+        let sibling = exe.join(sibling_name);
         if sibling.is_file() {
             return Some(sibling);
         }
     }
-    let staged = manifest_dir.join("third_party/stockfish/bundle/stockfish-macos-universal");
+    let staged = manifest_dir
+        .join("third_party/stockfish/bundle")
+        .join(staged_name);
     if staged.is_file() {
         return Some(staged);
     }

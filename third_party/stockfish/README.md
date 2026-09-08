@@ -1,11 +1,12 @@
-# Stockfish 19 — macOS universal bundle (reproducible, GPL-3.0)
+# Stockfish 19 — macOS and Windows bundles (reproducible, GPL-3.0)
 
 This directory holds **only** reproducible pin metadata and GPL text. The
-105 MB universal executable and its source archive are **never committed**;
-they live in gitignored `bundle/` and `cache/` and are fetched by
-`scripts/fetch-stockfish.sh`.
+executables and their archives are **never committed**; they live in
+gitignored `bundle/` and `cache/` and are fetched either by
+`src/fetch.rs` automatically on first run (macOS, Windows x86-64, Windows
+arm64) or by `scripts/fetch-stockfish.sh` manually (macOS only today).
 
-## Pin (independently verified 2026-09-07)
+## macOS pin (independently verified 2026-09-07)
 
 Source: `memory://crowded-chess/decisions/stockfish-19-mac-os-artifact-pin`
 (`basic-memory/decisions/Stockfish 19 macOS artifact pin.md`)
@@ -35,6 +36,40 @@ Source: `memory://crowded-chess/decisions/stockfish-19-mac-os-artifact-pin`
 Machine-readable pin: `third_party/stockfish/manifest.json`
 Durable pointer: `third_party/stockfish/SOURCE_POINTER.txt`
 GPL text: `third_party/stockfish/Copying.txt` (tracked verbatim)
+
+## Windows pins (independently verified 2026-09-08)
+
+Same tag/commit as the macOS pin above (`sf_19`,
+`edb0d9db6731067ec50ce619ff372b463bc4dd5d`). Both assets are release-wide zip
+archives containing the full source tree plus one prebuilt executable each;
+GitHub's own reported release-asset digest was cross-checked against a
+locally computed SHA-256 for both and matched.
+
+- **x86-64:** `stockfish-windows-x86-64-universal.zip` — 81,431,614 bytes —
+  SHA-256 `3c8bf1f9ea66a09350a40df4f632288285ac206d99f33ab5842c408fc30b48a7`
+  — executable `stockfish/stockfish-windows-x86-64-universal.exe` inside the
+  zip, 103,046,300 bytes, SHA-256
+  `45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0`,
+  `PE32+ executable (console) x86-64 ..., for MS Windows` (`file`-verified,
+  never executed)
+- **arm64:** `stockfish-windows-arm64-universal.zip` — 80,190,536 bytes —
+  SHA-256 `8372ad3f0d7276deb2c70f801f541ec7db463219fc6d9c7592864e542aa4f401`
+  — executable `stockfish/stockfish-windows-arm64-universal.exe` inside the
+  zip, 100,303,360 bytes, SHA-256
+  `3b5881df3d6f92817cf6664a6a18a473b50d424c71a1247fe4268090db281413`,
+  `PE32+ executable (console) Aarch64, for MS Windows` (`file`-verified,
+  never executed)
+- Both archives' `Copying.txt` are byte-identical (same SHA-256) to the
+  macOS pin's, confirming the same commit/license text across platforms.
+- Windows binaries auto-fetch through `src/fetch.rs` on first run;
+  `scripts/fetch-stockfish.sh` does not cover Windows yet (it is a bash
+  script, and the automatic Rust path already gives Windows the same
+  first-run convenience macOS gets, so a `.ps1` equivalent has not been
+  written).
+
+Machine-readable pin: `third_party/stockfish/manifest.json`
+(`windows_x86_64_binary`, `windows_arm64_binary`)
+Decision record: `basic-memory/decisions/Stockfish 19 Windows artifact pin.md`
 
 ## Usage
 

@@ -23,6 +23,30 @@
     "universal": true,
     "executable_size_bytes": 105458632
   },
+  "windows_x86_64_binary": {
+    "durable_url": "https://github.com/official-stockfish/Stockfish/releases/download/sf_19/stockfish-windows-x86-64-universal.zip",
+    "size_bytes": 81431614,
+    "sha256": "3c8bf1f9ea66a09350a40df4f632288285ac206d99f33ab5842c408fc30b48a7",
+    "github_reported_digest": "sha256:3c8bf1f9ea66a09350a40df4f632288285ac206d99f33ab5842c408fc30b48a7",
+    "archive_top_prefix": "stockfish/",
+    "executable_in_archive": "stockfish/stockfish-windows-x86-64-universal.exe",
+    "executable_sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0",
+    "executable_size_bytes": 103046300,
+    "architecture": "x86_64",
+    "file_output": "PE32+ executable (console) x86-64 (stripped to external PDB), for MS Windows"
+  },
+  "windows_arm64_binary": {
+    "durable_url": "https://github.com/official-stockfish/Stockfish/releases/download/sf_19/stockfish-windows-arm64-universal.zip",
+    "size_bytes": 80190536,
+    "sha256": "8372ad3f0d7276deb2c70f801f541ec7db463219fc6d9c7592864e542aa4f401",
+    "github_reported_digest": "sha256:8372ad3f0d7276deb2c70f801f541ec7db463219fc6d9c7592864e542aa4f401",
+    "archive_top_prefix": "stockfish/",
+    "executable_in_archive": "stockfish/stockfish-windows-arm64-universal.exe",
+    "executable_sha256": "3b5881df3d6f92817cf6664a6a18a473b50d424c71a1247fe4268090db281413",
+    "executable_size_bytes": 100303360,
+    "architecture": "aarch64",
+    "file_output": "PE32+ executable (console) Aarch64, for MS Windows"
+  },
   "source_archive": {
     "durable_url": "https://github.com/official-stockfish/Stockfish/archive/refs/tags/sf_19.zip",
     "codeload_url": "https://codeload.github.com/official-stockfish/Stockfish/zip/refs/tags/sf_19",
@@ -42,15 +66,18 @@
     "size_bytes": 35149,
     "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "source": "https://raw.githubusercontent.com/official-stockfish/Stockfish/sf_19/Copying.txt",
-    "present_in_both_archives": true
+    "present_in_both_archives": true,
+    "note": "Also present, byte-identical (same sha256), inside both the windows_x86_64_binary and windows_arm64_binary archives above — cross-checked, not re-fetched."
   },
   "authenticity": {
     "official_signature_published": false,
-    "verification": "HTTPS origin (stockfishchess.org via Cloudflare, github.com via TLS -> release-assets Azure signed URL) + locally computed SHA-256; no GPG/signature file published for sf_19"
+    "verification": "HTTPS origin (stockfishchess.org via Cloudflare, github.com via TLS -> release-assets Azure signed URL) + locally computed SHA-256; no GPG/signature file published for sf_19. Windows assets additionally cross-checked against GitHub's own reported release-asset digest, which matched the locally computed SHA-256 for both."
   },
   "bundle": {
     "staging_dir": "third_party/stockfish/bundle",
     "executable": "third_party/stockfish/bundle/stockfish-macos-universal",
+    "windows_x86_64_executable": "third_party/stockfish/bundle/stockfish-windows-x86-64-universal.exe",
+    "windows_arm64_executable": "third_party/stockfish/bundle/stockfish-windows-arm64-universal.exe",
     "cache_dir": "third_party/stockfish/cache",
     "gitignored": true
   }
