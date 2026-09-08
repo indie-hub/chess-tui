@@ -119,6 +119,22 @@ fn painted(data: &[u8; SPRITE_SIZE * SPRITE_SIZE * 4], x: u32, y: u32, bg: [u8; 
 }
 
 #[test]
+fn tab_cycles_selected_piece_legal_destinations() {
+    let mut game = Game::default();
+    key(&mut game, KeyCode::Enter);
+    assert_eq!(game.selected, Some(Square::E2));
+
+    key(&mut game, KeyCode::Tab);
+    assert_eq!(game.cursor, Square::E3);
+    key(&mut game, KeyCode::Tab);
+    assert_eq!(game.cursor, Square::E4);
+    assert!(!game.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE)));
+    assert_eq!(game.cursor, Square::E3);
+    assert!(!game.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT)));
+    assert_eq!(game.cursor, Square::E4);
+}
+
+#[test]
 fn keyboard_selection_illegal_move_cancel_restart_and_exit() {
     let mut game = Game::default();
     key(&mut game, KeyCode::Enter);

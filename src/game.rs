@@ -149,6 +149,41 @@ impl Game {
             .collect()
     }
 
+    pub(crate) fn cycle_legal_destination(&mut self, forward: bool) {
+        let Some(selected) = self.selected else {
+            return;
+        };
+        let mut destinations: Vec<_> = self
+            .position
+            .legal_moves()
+            .into_iter()
+            .filter(|m| m.from() == Some(selected))
+            .map(destination)
+            .collect();
+        destinations.sort_by_key(|square| square.to_u32());
+        destinations.dedup();
+        let Some(index) = destinations
+            .iter()
+            .position(|&square| square == self.cursor)
+        else {
+            self.cursor = if forward {
+                destinations.first().copied()
+            } else {
+                destinations.last().copied()
+            }
+            .unwrap_or(self.cursor);
+            return;
+        };
+        if !destinations.is_empty() {
+            let next = if forward {
+                (index + 1) % destinations.len()
+            } else {
+                (index + destinations.len() - 1) % destinations.len()
+            };
+            self.cursor = destinations[next];
+        }
+    }
+
     pub(crate) fn play(&mut self, m: Move) {
         if self.ending().is_some() || !self.position.is_legal(m) {
             self.notice = "Illegal move.".into();

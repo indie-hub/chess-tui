@@ -42,6 +42,7 @@ app runs a local two-player game and shows a notice.
 | --- | --- |
 | Arrows or `hjkl` | Move the board cursor |
 | Enter | Select your piece, then play at the cursor |
+| Tab / Shift+Tab | Cycle forward / backward through legal destinations for the selected piece |
 | Escape | Cancel selection or promotion |
 | `q`, `r`, `b`, `n` during promotion | Choose queen, rook, bishop, or knight |
 | `d` | Claim a draw if eligible (also works while choosing promotion) |

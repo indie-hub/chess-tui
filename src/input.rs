@@ -85,6 +85,10 @@ impl Game {
                 KeyCode::Char('s') if self.versus_engine => self.switch_sides(),
                 KeyCode::Char('d') => self.claim_draw(),
                 KeyCode::Enter => self.select(),
+                KeyCode::Tab => {
+                    self.cycle_legal_destination(!key.modifiers.contains(KeyModifiers::SHIFT))
+                }
+                KeyCode::BackTab => self.cycle_legal_destination(false),
                 KeyCode::Left | KeyCode::Char('h') => file -= direction,
                 KeyCode::Right | KeyCode::Char('l') => file += direction,
                 KeyCode::Up | KeyCode::Char('k') => rank += direction,
