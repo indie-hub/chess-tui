@@ -1,0 +1,19 @@
+Stockfish 19 — exact source pointer (GPL-3.0 compliance)
+tag: sf_19
+commit: edb0d9db6731067ec50ce619ff372b463bc4dd5d
+bench: 2497913
+published: 2026-09-05T08:33:17Z
+binary durable URL: https://github.com/official-stockfish/Stockfish/releases/download/sf_19/stockfish-macos-universal.tar.gz
+binary size: 82323876 bytes
+binary sha256: a1f0e3bcc5a6927a11fe6fc8e54a779754645f3c2bae2cf13420fd1957adaa77
+executable sha256: 8eed61129d1493c5d1f2fd9323f0c54c47ac49319911fbde18c6b9c87e8b13c5
+architectures: x86_64 arm64 (universal)
+source zip durable URL: https://github.com/official-stockfish/Stockfish/archive/refs/tags/sf_19.zip
+source zip codeload: https://codeload.github.com/official-stockfish/Stockfish/zip/refs/tags/sf_19
+source zip size: 373314 bytes
+source zip sha256: 024a509d7af387218bd59c559473a71a1d6b411885010543891495119a671119
+source tar.gz alternate: https://github.com/official-stockfish/Stockfish/archive/refs/tags/sf_19.tar.gz (291206 bytes, 519b653d0d1ffb96531d982ccbe5c6a19425e8388e0e3c2f70f34b424ab32d76)
+license: GPL-3.0 — Copying.txt 35149 bytes sha256 3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986 (https://raw.githubusercontent.com/official-stockfish/Stockfish/sf_19/Copying.txt)
+download page: https://stockfishchess.org/download/
+release page: https://github.com/official-stockfish/Stockfish/releases/tag/sf_19
+no official signature/checksum file published; verify via HTTPS origin + local SHA-256 above

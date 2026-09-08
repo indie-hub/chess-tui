@@ -1,4 +1,4 @@
-use shakmaty::{Chess, Move, Position, Square, san::SanPlus};
+use shakmaty::{Chess, Color, EnPassantMode, Move, Position, Square, fen::Fen, san::SanPlus};
 
 pub(crate) struct Game {
     pub(crate) position: Chess,
@@ -10,6 +10,12 @@ pub(crate) struct Game {
     pub(crate) last_move: Option<(Square, Square)>,
     pub(crate) claimed: bool,
     pub(crate) notice: String,
+    pub(crate) versus_engine: bool,
+    pub(crate) engine_side: Color,
+    pub(crate) engine_status: String,
+    pub(crate) engine_failed: bool,
+    pub(crate) captured_by_white: Vec<shakmaty::Role>,
+    pub(crate) captured_by_black: Vec<shakmaty::Role>,
 }
 
 impl Default for Game {
@@ -25,6 +31,12 @@ impl Default for Game {
             last_move: None,
             claimed: false,
             notice: "White: light pieces. Black: dark pieces.".into(),
+            versus_engine: false,
+            engine_side: Color::Black,
+            engine_status: String::new(),
+            engine_failed: false,
+            captured_by_white: Vec::new(),
+            captured_by_black: Vec::new(),
         }
     }
 }
@@ -41,6 +53,17 @@ pub(crate) fn destination(m: Move) -> Square {
             king.rank(),
         ),
         _ => m.to(),
+    }
+}
+
+#[allow(dead_code)]
+fn role_value(role: shakmaty::Role) -> i32 {
+    match role {
+        shakmaty::Role::Pawn => 1,
+        shakmaty::Role::Knight | shakmaty::Role::Bishop => 3,
+        shakmaty::Role::Rook => 5,
+        shakmaty::Role::Queen => 9,
+        shakmaty::Role::King => 0,
     }
 }
 
@@ -83,6 +106,12 @@ impl Game {
         if self.ending().is_some() || !self.position.is_legal(m) {
             self.notice = "Illegal move.".into();
             return;
+        }
+        if let Some(captured) = m.capture() {
+            match self.position.turn() {
+                Color::White => self.captured_by_white.push(captured),
+                Color::Black => self.captured_by_black.push(captured),
+            }
         }
         self.history
             .push(SanPlus::from_move(self.position.clone(), m).to_string());
@@ -137,6 +166,205 @@ impl Game {
             self.notice.clear();
         } else {
             self.notice = "No draw claim here or after the selected move.".into();
+        }
+    }
+
+    pub(crate) fn new_vs_engine(engine_side: Color) -> Self {
+        Self {
+            versus_engine: true,
+            engine_side,
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn engine_to_move(&self) -> bool {
+        self.versus_engine && self.position.turn() == self.engine_side
+    }
+
+    pub(crate) fn switch_sides(&mut self) {
+        *self = Self::new_vs_engine(!self.engine_side);
+    }
+
+    pub(crate) fn to_fen(&self) -> String {
+        Fen::from_position(&self.position, EnPassantMode::Legal).to_string()
+    }
+
+    /// Roles captured by `side` (pieces that `side` has taken).
+    /// Returned slice is in capture order. Empty if `side` has not captured.
+    #[allow(dead_code)]
+    pub(crate) fn captured_by(&self, side: Color) -> &[shakmaty::Role] {
+        match side {
+            Color::White => &self.captured_by_white,
+            Color::Black => &self.captured_by_black,
+        }
+    }
+
+    /// Conventional material balance: sum of captured values for White minus
+    /// sum for Black (pawn 1, knight/bishop 3, rook 5, queen 9, king 0).
+    /// Positive means White has captured more material than Black (White advantage).
+    #[allow(dead_code)]
+    pub(crate) fn material_balance(&self) -> i32 {
+        let white: i32 = self.captured_by_white.iter().map(|r| role_value(*r)).sum();
+        let black: i32 = self.captured_by_black.iter().map(|r| role_value(*r)).sum();
+        white - black
+    }
+}
+
+#[cfg(test)]
+mod material_score_tests {
+    use super::Game;
+    use shakmaty::{CastlingMode, Chess, Position, Role, Square, fen::Fen, uci::UciMove};
+
+    fn position(fen: &str) -> Game {
+        let pos = fen
+            .parse::<Fen>()
+            .unwrap()
+            .into_position::<Chess>(CastlingMode::Standard)
+            .unwrap();
+        Game {
+            positions: vec![pos.clone()],
+            position: pos,
+            ..Game::default()
+        }
+    }
+
+    fn move_uci(game: &mut Game, uci: &str) {
+        let m = uci
+            .parse::<UciMove>()
+            .unwrap()
+            .to_move(&game.position)
+            .unwrap();
+        game.play(m);
+    }
+
+    #[test]
+    fn ordinary_capture_tracks_by_capturer() {
+        let mut game = position("4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1");
+        move_uci(&mut game, "e4d5");
+        assert_eq!(game.captured_by(shakmaty::Color::White), &[Role::Pawn]);
+        assert!(game.captured_by(shakmaty::Color::Black).is_empty());
+        assert_eq!(game.material_balance(), 1);
+    }
+
+    #[test]
+    fn en_passant_capture_counts_as_pawn() {
+        let mut game = position("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1");
+        move_uci(&mut game, "e5d6");
+        assert_eq!(game.captured_by(shakmaty::Color::White), &[Role::Pawn]);
+        assert_eq!(game.material_balance(), 1);
+        assert!(game.position.board().piece_at(Square::D5).is_none());
+    }
+
+    #[test]
+    fn promotion_after_capture_counts_captured_role_not_promoted() {
+        let mut game = position("r3k3/1P6/8/8/8/8/8/4K3 w - - 0 1");
+        move_uci(&mut game, "b7a8q");
+        assert_eq!(game.captured_by(shakmaty::Color::White), &[Role::Rook]);
+        assert_eq!(game.material_balance(), 5);
+        assert_eq!(
+            game.position.board().piece_at(Square::A8).unwrap().role,
+            Role::Queen
+        );
+    }
+
+    #[test]
+    fn castling_and_non_capture_do_not_affect_material() {
+        let mut game = position("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
+        move_uci(&mut game, "e1g1");
+        assert!(game.captured_by(shakmaty::Color::White).is_empty());
+        assert!(game.captured_by(shakmaty::Color::Black).is_empty());
+        assert_eq!(game.material_balance(), 0);
+        let mut game = Game::default();
+        move_uci(&mut game, "e2e4");
+        assert_eq!(game.material_balance(), 0);
+        assert!(game.captured_by(shakmaty::Color::White).is_empty());
+    }
+
+    #[test]
+    fn material_balance_positive_for_white_advantage() {
+        let mut g = position("4k3/8/2q5/3P4/8/8/8/4K3 w - - 0 1");
+        move_uci(&mut g, "d5c6");
+        assert_eq!(g.captured_by(shakmaty::Color::White), &[Role::Queen]);
+        assert_eq!(g.material_balance(), 9);
+        let mut g = position("r3k3/8/8/8/8/8/P7/4K3 b - - 0 1");
+        move_uci(&mut g, "a8a2");
+        assert_eq!(g.captured_by(shakmaty::Color::Black), &[Role::Pawn]);
+        assert_eq!(g.material_balance(), -1);
+        // Sequential white queen then black rook -> 9 -5 =4
+        let mut game = position("3rk3/8/8/3q4/3R4/8/8/4K3 w - - 0 1");
+        move_uci(&mut game, "d4d5");
+        assert_eq!(game.captured_by(shakmaty::Color::White), &[Role::Queen]);
+        assert_eq!(game.material_balance(), 9);
+        move_uci(&mut game, "d8d5");
+        assert_eq!(game.captured_by(shakmaty::Color::Black), &[Role::Rook]);
+        assert_eq!(game.material_balance(), 4);
+    }
+
+    #[test]
+    fn multiple_captures_accumulate_and_balance() {
+        let mut game = position("4k3/8/8/2q5/3P4/8/8/4K3 w - - 0 1");
+        move_uci(&mut game, "d4c5");
+        assert_eq!(game.captured_by(shakmaty::Color::White), &[Role::Queen]);
+        let mut game = position("4k3/8/8/8/4p3/3P4/8/4K3 b - - 0 1");
+        move_uci(&mut game, "e4d3");
+        assert_eq!(game.captured_by(shakmaty::Color::Black), &[Role::Pawn]);
+        assert_eq!(game.material_balance(), -1);
+        let mut game = position("3rk3/8/8/3q4/3R4/8/8/4K3 w - - 0 1");
+        move_uci(&mut game, "d4d5");
+        move_uci(&mut game, "d8d5");
+        assert_eq!(game.captured_by(shakmaty::Color::White), &[Role::Queen]);
+        assert_eq!(game.captured_by(shakmaty::Color::Black), &[Role::Rook]);
+        assert_eq!(game.material_balance(), 4);
+    }
+
+    #[test]
+    fn restart_and_switch_sides_reset_captures() {
+        let mut game = position("4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1");
+        move_uci(&mut game, "e4d5");
+        assert_eq!(game.material_balance(), 1);
+        let fresh = Game::default();
+        assert_eq!(fresh.material_balance(), 0);
+        assert!(fresh.captured_by(shakmaty::Color::White).is_empty());
+        assert!(fresh.captured_by(shakmaty::Color::Black).is_empty());
+        let mut vs = position("4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1");
+        vs.versus_engine = true;
+        vs.engine_side = shakmaty::Color::Black;
+        move_uci(&mut vs, "e4d5");
+        assert_eq!(vs.material_balance(), 1);
+        vs.switch_sides();
+        assert_eq!(vs.material_balance(), 0);
+        assert!(vs.captured_by(shakmaty::Color::White).is_empty());
+    }
+
+    #[test]
+    fn engine_moves_through_play_are_tracked() {
+        let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+        // Human plays e4 (non-capture)
+        move_uci(&mut game, "e2e4");
+        assert_eq!(game.material_balance(), 0);
+        // Engine (black) captures on e4? Set up so engine capture is legal via play.
+        // Simulate engine playing d7d5 then human capturing en passant style not needed.
+        // Instead directly play a black capture through same play method.
+        let mut game = position("4k3/8/8/8/4p3/3P4/8/4K3 b - - 0 1");
+        move_uci(&mut game, "e4d3"); // black pawn e4 captures white pawn d3
+        assert_eq!(game.captured_by(shakmaty::Color::Black), &[Role::Pawn]);
+        assert_eq!(game.material_balance(), -1);
+    }
+
+    #[test]
+    fn knight_bishop_rook_queen_values() {
+        // Directly test role_value via material_balance by capturing each role
+        for (fen, cap, expected) in [
+            ("4k3/8/8/3n4/4P3/8/8/4K3 w - - 0 1", Role::Knight, 3),
+            ("4k3/8/8/3b4/4P3/8/8/4K3 w - - 0 1", Role::Bishop, 3),
+            ("4k3/8/8/3r4/4P3/8/8/4K3 w - - 0 1", Role::Rook, 5),
+            ("4k3/8/8/3q4/4P3/8/8/4K3 w - - 0 1", Role::Queen, 9),
+            ("4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1", Role::Pawn, 1),
+        ] {
+            let mut game = position(fen);
+            move_uci(&mut game, "e4d5");
+            assert_eq!(game.captured_by(shakmaty::Color::White)[0], cap);
+            assert_eq!(game.material_balance(), expected);
         }
     }
 }

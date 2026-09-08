@@ -1,3 +1,5 @@
+use crate::drive_engine;
+use crate::engine::Engine;
 use crate::game::{Game, destination};
 use crate::render::{
     BOARD_CELLS_H, BOARD_CELLS_W, BOARD_X, BOARD_Y, MIN_HEIGHT, MIN_WIDTH, SQUARE_H, SQUARE_W,
@@ -5,11 +7,51 @@ use crate::render::{
 };
 use crate::sprites::{SPRITE_SIZE, sprite_pixels};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-
 use ratatui::{Terminal, backend::TestBackend, style::Color};
 use sha2::{Digest, Sha256};
 use shakmaty::{CastlingMode, Chess, Position, Role, Square, fen::Fen, uci::UciMove};
 use std::collections::HashSet;
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+static ENGINE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn engine_lock() -> std::sync::MutexGuard<'static, ()> {
+    ENGINE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+fn fake_engine_path() -> String {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_fake_engine") {
+        return path;
+    }
+    // Fallback: the fake engine sits in the same target directory as the test binary.
+    let target = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+        .and_then(|parent| parent.parent().map(|p| p.to_path_buf()));
+    match target {
+        Some(dir) => dir.join("fake_engine").to_string_lossy().into_owned(),
+        None => "fake_engine".into(),
+    }
+}
+
+fn wait_bestmove(engine: &mut Engine, timeout: Duration) -> Option<String> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        match engine.try_bestmove() {
+            Some(Ok(mv)) => return Some(mv),
+            Some(Err(_)) => return None,
+            None => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
+    None
+}
 
 fn position(fen: &str) -> Game {
     let position = fen
@@ -242,7 +284,7 @@ fn repetition_identity_includes_rights_and_legal_en_passant() {
 fn modules_split_rules_input_and_rendering() {
     let (min_width, min_height) = (MIN_WIDTH, MIN_HEIGHT);
     assert!(min_width == 170);
-    assert!(min_height == 72);
+    assert!(min_height == 68);
     assert_ne!(base_bg(0, 0), base_bg(0, 1));
     assert_ne!(
         sprite_index(shakmaty::Color::White, Role::King),
@@ -458,20 +500,23 @@ fn board_paints_exact_sprites_with_highlights() {
     assert!(bright, "white pawn interior not rendered on e2");
     assert!(dark, "white pawn outline not rendered on e2");
 
-    // Select e2: empty legal e4 square keeps the exact green highlight.
+    // Select e2: empty legal e4 shows the small centred green marker.
     key(&mut game, KeyCode::Enter);
     draw_terminal(&mut terminal, &game);
     let buffer = terminal.backend().buffer();
     let (gx, gy) = sq(4, 4);
-    assert_eq!(buffer[(gx + 1, gy + 1)].bg, Color::Rgb(80, 150, 80));
+    assert_eq!(buffer[(gx + 7, gy + 3)].bg, Color::Rgb(60, 200, 60));
+    assert_eq!(buffer[(gx + 1, gy + 1)].bg, Color::Rgb(158, 158, 158));
 
-    // Move e2-e4: the now-empty e2 square keeps the exact blue last-move.
+    // Move e2-e4: the now-empty e2 keeps a subtle blue outline.
     key(&mut game, KeyCode::Char('k'));
     key(&mut game, KeyCode::Char('k'));
     key(&mut game, KeyCode::Enter);
     draw_terminal(&mut terminal, &game);
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(x + 1, y + 1)].bg, Color::Rgb(80, 120, 190));
+    assert_eq!(buffer[(x, y)].symbol(), "┌");
+    assert_eq!(buffer[(x, y)].fg, Color::Rgb(90, 130, 205));
+    assert_eq!(buffer[(x + 5, y + 3)].bg, Color::Rgb(158, 158, 158));
 
     let text = buffer_text(&terminal);
     for g in ['♔', '♕', '♖', '♗', '♘', '♙', '♚', '♛', '♜', '♝', '♞', '♟'] {
@@ -504,9 +549,10 @@ fn selected_square_shows_box_outline() {
     let cell = &buffer[(x + cx, y + cy)];
     assert_eq!(cell.fg, Color::Rgb(top[0], top[1], top[2]));
     assert_eq!(cell.bg, Color::Rgb(bottom[0], bottom[1], bottom[2]));
-    // Legal destination e4 keeps the green fill.
+    // Legal destination e4 shows the small centred green marker.
     let (gx, gy) = sq(4, 4);
-    assert_eq!(buffer[(gx + 1, gy + 1)].bg, Color::Rgb(80, 150, 80));
+    assert_eq!(buffer[(gx + 7, gy + 3)].bg, Color::Rgb(60, 200, 60));
+    assert_eq!(buffer[(gx + 1, gy + 1)].bg, Color::Rgb(158, 158, 158));
 }
 
 #[test]
@@ -516,7 +562,7 @@ fn cursor_shows_corner_brackets() {
     draw_terminal(&mut terminal, &game);
     let buffer = terminal.backend().buffer();
     let (x, y) = sq(4, 6);
-    let white = Color::Rgb(255, 255, 255);
+    let white = Color::Rgb(0, 220, 255);
     assert_eq!(buffer[(x, y)].symbol(), "┌");
     assert_eq!(buffer[(x, y)].fg, white);
     assert_eq!(buffer[(x + SQUARE_W - 1, y)].symbol(), "┐");
@@ -531,6 +577,364 @@ fn cursor_shows_corner_brackets() {
             || cell.symbol() == "█",
         "interior must be sprite pixels"
     );
+}
+
+#[test]
+fn capturable_destination_shows_amber_outline() {
+    let mut game = position("4k3/8/8/8/1b6/8/3QK3/8 w - - 0 1");
+    game.cursor = Square::D2;
+    key(&mut game, KeyCode::Enter);
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    // b4 is a capturable destination: amber outline, no fill, piece stays exact.
+    let (dx, dy) = sq(1, 4);
+    assert_eq!(buffer[(dx, dy)].symbol(), "┌");
+    assert_eq!(buffer[(dx, dy)].fg, Color::Rgb(230, 80, 20));
+    // e1 is an empty legal destination: green centred marker.
+    let (ex, ey) = sq(4, 7);
+    assert_eq!(buffer[(ex + 7, ey + 3)].bg, Color::Rgb(60, 200, 60));
+}
+
+#[test]
+fn selection_takes_precedence_over_last_move_outline() {
+    let mut game = position("4k3/8/8/8/4P3/8/8/4K3 w - - 0 1");
+    game.last_move = Some((Square::E2, Square::E4));
+    game.cursor = Square::E4;
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    let (x, y) = sq(4, 4);
+    assert_eq!(
+        buffer[(x + 5, y)].symbol(),
+        "─",
+        "top edge line before selection"
+    );
+    assert_eq!(
+        buffer[(x + 5, y)].fg,
+        Color::Rgb(90, 130, 205),
+        "last-move blue outline before selection"
+    );
+    key(&mut game, KeyCode::Enter); // cursor is on e4; select the pawn
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    assert_eq!(
+        buffer[(x + 5, y)].fg,
+        Color::Rgb(255, 210, 40),
+        "selection gold outline wins over last-move blue"
+    );
+}
+
+#[test]
+fn cursor_on_legal_destination_shows_white_corners_and_marker() {
+    let mut game = Game::default();
+    key(&mut game, KeyCode::Enter); // select e2
+    game.cursor = Square::E4;
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    let (x, y) = sq(4, 4);
+    assert_eq!(buffer[(x, y)].symbol(), "┌");
+    assert_eq!(buffer[(x, y)].fg, Color::Rgb(0, 220, 255));
+    assert_eq!(buffer[(x + 7, y + 3)].bg, Color::Rgb(60, 200, 60));
+}
+
+#[test]
+fn cursor_on_capture_shows_white_corners_and_amber_outline() {
+    let mut game = position("4k3/8/8/8/1b6/8/3QK3/8 w - - 0 1");
+    game.cursor = Square::D2;
+    key(&mut game, KeyCode::Enter);
+    game.cursor = Square::B4;
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    let (x, y) = sq(1, 4);
+    assert_eq!(buffer[(x, y)].symbol(), "┌");
+    assert_eq!(
+        buffer[(x, y)].fg,
+        Color::Rgb(0, 220, 255),
+        "cursor corner visible"
+    );
+    assert_eq!(
+        buffer[(x + 5, y)].fg,
+        Color::Rgb(230, 80, 20),
+        "amber outline stays visible"
+    );
+}
+
+#[test]
+fn cursor_on_last_move_shows_white_corners_and_blue_outline() {
+    let mut game = position("4k3/8/8/8/4P3/8/8/4K3 w - - 0 1");
+    game.last_move = Some((Square::E2, Square::E4));
+    game.cursor = Square::E4;
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    let (x, y) = sq(4, 4);
+    assert_eq!(buffer[(x, y)].symbol(), "┌");
+    assert_eq!(
+        buffer[(x, y)].fg,
+        Color::Rgb(0, 220, 255),
+        "cursor corner visible"
+    );
+    assert_eq!(
+        buffer[(x + 5, y)].fg,
+        Color::Rgb(90, 130, 205),
+        "blue outline stays visible"
+    );
+}
+
+#[test]
+fn legal_marker_takes_precedence_over_last_move() {
+    // The king's legal move back to e2 must win over the e2 last-move outline.
+    let mut game = position("4k3/8/8/8/4P3/8/8/4K3 w - - 0 1");
+    game.last_move = Some((Square::E2, Square::E4));
+    game.cursor = Square::E1;
+    key(&mut game, KeyCode::Enter);
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    let (x, y) = sq(4, 6);
+    assert_eq!(
+        buffer[(x + 7, y + 3)].bg,
+        Color::Rgb(60, 200, 60),
+        "green marker wins"
+    );
+    assert_ne!(
+        buffer[(x, y)].symbol(),
+        "┌",
+        "no blue outline on a legal marker square"
+    );
+}
+
+#[test]
+fn capture_outline_preserves_exact_sprite_interior() {
+    let mut game = position("4k3/8/8/8/1b6/8/3QK3/8 w - - 0 1");
+    game.cursor = Square::D2;
+    key(&mut game, KeyCode::Enter);
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    let (x, y) = sq(1, 4);
+    let data = sprite_pixels(shakmaty::Color::Black, Role::Bishop);
+    let e2_bg = [110, 110, 110];
+    let (cx, cy) = (8u16, 4u16);
+    let top = painted(data, cx as u32, (cy * 2) as u32, e2_bg);
+    let bottom = painted(data, cx as u32, (cy * 2 + 1) as u32, e2_bg);
+    let cell = &buffer[(x + cx, y + cy)];
+    assert_eq!(
+        cell.fg,
+        Color::Rgb(top[0], top[1], top[2]),
+        "capture interior exact"
+    );
+    assert_eq!(
+        cell.bg,
+        Color::Rgb(bottom[0], bottom[1], bottom[2]),
+        "capture interior exact"
+    );
+}
+
+#[test]
+fn header_reflects_active_mode_and_engine_failure() {
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    let game = Game::new_vs_engine(shakmaty::Color::Black);
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    assert!(
+        text.contains("You: White vs Stockfish"),
+        "engine-mode header"
+    );
+    let mut failed = Game::new_vs_engine(shakmaty::Color::Black);
+    failed.engine_failed = true;
+    draw_terminal(&mut terminal, &failed);
+    let text = buffer_text(&terminal);
+    assert!(
+        text.contains("Local two-player"),
+        "failed engine header must not claim Stockfish"
+    );
+    assert!(!text.contains("vs Stockfish"));
+    let local = Game::default();
+    draw_terminal(&mut terminal, &local);
+    assert!(buffer_text(&terminal).contains("Local two-player"));
+}
+
+#[test]
+fn long_engine_status_wraps_in_panel() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    game.engine_status =
+        "Engine error: engine not found (set STOCKFISH_PATH or place stockfish next to the binary)"
+            .into();
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    for expected in [
+        "STOCKFISH_PATH",
+        "next to the binary",
+        "white to move",
+        "Recent moves",
+    ] {
+        assert!(text.contains(expected), "missing {expected}");
+    }
+}
+
+#[test]
+fn legal_marker_visible_on_light_and_dark_squares() {
+    let mut game = position("4k3/8/8/8/8/8/8/R3K3 w - - 0 1");
+    game.cursor = Square::E1;
+    key(&mut game, KeyCode::Enter);
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    let (lx, ly) = sq(3, 7); // d1 (light square)
+    assert_eq!(
+        buffer[(lx + 7, ly + 3)].bg,
+        Color::Rgb(60, 200, 60),
+        "light square marker"
+    );
+    let (dx, dy) = sq(3, 6); // d2 (dark square)
+    assert_eq!(
+        buffer[(dx + 7, dy + 3)].bg,
+        Color::Rgb(60, 200, 60),
+        "dark square marker"
+    );
+}
+
+#[test]
+fn cursor_corners_visible_on_light_and_dark_squares() {
+    let mut game = Game {
+        cursor: Square::A1,
+        ..Game::default()
+    };
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    let (x, y) = sq(0, 7);
+    assert_eq!(
+        buffer[(x, y)].fg,
+        Color::Rgb(0, 220, 255),
+        "cursor corner on dark square"
+    );
+    game.cursor = Square::A8; // light square
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    let (x2, y2) = sq(0, 0);
+    assert_eq!(
+        buffer[(x2, y2)].fg,
+        Color::Rgb(0, 220, 255),
+        "cursor corner on light square"
+    );
+}
+
+#[test]
+fn capture_outline_works_on_both_base_colors_and_piece_colors() {
+    // Dark square + black piece: queen d2 captures the bishop on b4.
+    let mut game = position("4k3/8/8/8/1b6/8/3QK3/8 w - - 0 1");
+    game.cursor = Square::D2;
+    key(&mut game, KeyCode::Enter);
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    let (dx, dy) = sq(1, 4);
+    assert_eq!(
+        buffer[(dx, dy)].fg,
+        Color::Rgb(230, 80, 20),
+        "dark square amber outline"
+    );
+    let data = sprite_pixels(shakmaty::Color::Black, Role::Bishop);
+    let top = painted(data, 8, 8, [110, 110, 110]);
+    let bottom = painted(data, 8, 9, [110, 110, 110]);
+    let cell = &buffer[(dx + 8, dy + 4)];
+    assert_eq!(
+        cell.fg,
+        Color::Rgb(top[0], top[1], top[2]),
+        "dark capture interior exact"
+    );
+    assert_eq!(
+        cell.bg,
+        Color::Rgb(bottom[0], bottom[1], bottom[2]),
+        "dark capture interior exact"
+    );
+
+    // Light square + white piece: black knight d4 captures the pawn on b5.
+    let mut game2 = position("4k3/8/8/1P6/3n4/8/8/4K3 b - - 0 1");
+    game2.cursor = Square::D4;
+    key(&mut game2, KeyCode::Enter);
+    let mut terminal2 = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal2, &game2);
+    let buffer2 = terminal2.backend().buffer();
+    let (ex, ey) = sq(1, 3);
+    assert_eq!(
+        buffer2[(ex, ey)].fg,
+        Color::Rgb(230, 80, 20),
+        "light square amber outline"
+    );
+    let data2 = sprite_pixels(shakmaty::Color::White, Role::Pawn);
+    let top2 = painted(data2, 8, 8, [158, 158, 158]);
+    let bottom2 = painted(data2, 8, 9, [158, 158, 158]);
+    let cell2 = &buffer2[(ex + 8, ey + 4)];
+    assert_eq!(
+        cell2.fg,
+        Color::Rgb(top2[0], top2[1], top2[2]),
+        "light capture interior exact"
+    );
+    assert_eq!(
+        cell2.bg,
+        Color::Rgb(bottom2[0], bottom2[1], bottom2[2]),
+        "light capture interior exact"
+    );
+}
+
+#[test]
+fn en_passant_capture_shows_amber_outline_on_empty_square() {
+    let mut game = position("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1");
+    game.cursor = Square::E5;
+    key(&mut game, KeyCode::Enter);
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    // d6 is the en passant destination (empty): amber capture outline.
+    let (dx, dy) = sq(3, 2);
+    assert_eq!(buffer[(dx, dy)].symbol(), "┌");
+    assert_eq!(
+        buffer[(dx, dy)].fg,
+        Color::Rgb(230, 80, 20),
+        "en passant amber outline"
+    );
+    // e6 is a plain empty push: green marker.
+    let (ex, ey) = sq(4, 2);
+    assert_eq!(
+        buffer[(ex + 7, ey + 3)].bg,
+        Color::Rgb(60, 200, 60),
+        "empty push green marker"
+    );
+}
+
+#[test]
+fn draw_hint_shows_only_when_claimable() {
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    let game = Game::default();
+    draw_terminal(&mut terminal, &game);
+    assert!(
+        !buffer_text(&terminal).contains("Draw available"),
+        "no draw hint when not claimable"
+    );
+    let cycle = ["g1f3", "g8f6", "f3g1", "f6g8"];
+    let mut game = Game::default();
+    for _ in 0..2 {
+        for m in cycle {
+            move_uci(&mut game, m);
+        }
+    }
+    assert!(game.claimable());
+    assert!(game.ending().is_none());
+    draw_terminal(&mut terminal, &game);
+    assert!(buffer_text(&terminal).contains("Draw available: press d"));
+    // A pending notice takes the dynamic line instead of the hint.
+    game.notice = "Selected e2. Choose a legal destination.".into();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    assert!(text.contains("Selected e2"));
+    assert!(!text.contains("Draw available"));
 }
 
 #[test]
@@ -589,6 +993,459 @@ fn promotion_choice_is_readable() {
 }
 
 #[test]
+fn engine_starts_and_bestmove_enters_through_game_play() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "");
+    }
+    let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+    engine.start_search(START_FEN).expect("search start");
+    let mv = wait_bestmove(&mut engine, Duration::from_secs(3)).expect("bestmove");
+    assert_eq!(mv, "e2e4");
+
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    let parsed = UciMove::from_ascii(mv.as_bytes())
+        .expect("parses")
+        .to_move(&game.position)
+        .expect("legal move");
+    game.play(parsed);
+    assert_eq!(game.history, ["e4"]);
+    assert_eq!(game.position.turn(), shakmaty::Color::Black);
+    assert!(game.engine_to_move());
+    assert!(!engine.is_searching());
+    drop(engine);
+}
+
+#[test]
+fn engine_startup_ready_timeout_is_reported() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "no-ready");
+    }
+    let err = Engine::spawn(Path::new(&fake_engine_path()))
+        .err()
+        .expect("startup error");
+    assert!(err.message().contains("not ready"));
+}
+
+#[test]
+fn engine_illegal_bestmove_is_rejected_by_legality() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "illegal");
+    }
+    let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+    engine.start_search(START_FEN).expect("search start");
+    let mv = wait_bestmove(&mut engine, Duration::from_secs(3)).expect("bestmove");
+    assert_eq!(mv, "e2e5");
+    let game = Game::new_vs_engine(shakmaty::Color::Black);
+    // The illegal pawn move must not convert into a playable Move.
+    let parsed = UciMove::from_ascii(mv.as_bytes()).unwrap();
+    assert!(parsed.to_move(&game.position).is_err());
+}
+
+#[test]
+fn engine_no_bestmove_is_a_protocol_error() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "none");
+    }
+    let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+    engine.start_search(START_FEN).expect("search start");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut got_error = false;
+    while Instant::now() < deadline {
+        if let Some(Err(err)) = engine.try_bestmove() {
+            assert!(err.message().contains("protocol"));
+            got_error = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(got_error, "expected empty bestmove protocol error");
+}
+
+#[test]
+fn engine_search_stays_pending_without_response() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "timeout");
+    }
+    let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+    engine.start_search(START_FEN).expect("search start");
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(engine.is_searching());
+    assert!(engine.try_bestmove().is_none());
+    assert!(engine.thinking_status().contains("Engine thinking"));
+}
+
+#[test]
+fn engine_ignored_quit_is_killed_on_drop() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "ignore-quit");
+    }
+    let engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+    drop(engine);
+}
+
+#[test]
+fn engine_lookup_override_takes_precedence() {
+    let root = engine_lookup_root();
+    engine_lookup_temp_tree(&root, true, true);
+    let resolved = crate::engine::resolve_engine_path_from(
+        Some("/custom/stockfish"),
+        Some(&root.join("bin")),
+        &root.join("src"),
+    );
+    assert_eq!(
+        resolved,
+        Some(std::path::PathBuf::from("/custom/stockfish"))
+    );
+    // An override pointing at a missing path still wins (spawn reports the error).
+    let resolved = crate::engine::resolve_engine_path_from(
+        Some("/nonexistent/stockfish"),
+        Some(&root.join("bin")),
+        &root.join("src"),
+    );
+    assert_eq!(
+        resolved,
+        Some(std::path::PathBuf::from("/nonexistent/stockfish"))
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn engine_lookup_sibling_before_staged() {
+    let root = engine_lookup_root();
+    engine_lookup_temp_tree(&root, true, true);
+    let resolved =
+        crate::engine::resolve_engine_path_from(None, Some(&root.join("bin")), &root.join("src"));
+    assert_eq!(resolved, Some(root.join("bin/stockfish")));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn engine_lookup_staged_source_tree_when_no_sibling() {
+    let root = engine_lookup_root();
+    engine_lookup_temp_tree(&root, false, true);
+    let resolved =
+        crate::engine::resolve_engine_path_from(None, Some(&root.join("bin")), &root.join("src"));
+    assert_eq!(
+        resolved,
+        Some(root.join("src/third_party/stockfish/bundle/stockfish-macos-universal"))
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn engine_lookup_missing_paths_return_none() {
+    let root = engine_lookup_root();
+    engine_lookup_temp_tree(&root, false, false);
+    let resolved =
+        crate::engine::resolve_engine_path_from(None, Some(&root.join("bin")), &root.join("src"));
+    assert_eq!(resolved, None);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn engine_real_lookup_finds_staged_source_tree_binary() {
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let resolved = crate::engine::resolve_engine_path_from(None, None, &manifest);
+    assert_eq!(
+        resolved,
+        Some(manifest.join("third_party/stockfish/bundle/stockfish-macos-universal"))
+    );
+}
+
+#[test]
+fn engine_turn_blocks_move_input_but_keeps_cursor_and_restart() {
+    let mut game = position("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1");
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::Black;
+    assert!(game.engine_to_move());
+    key(&mut game, KeyCode::Enter);
+    assert_eq!(game.selected, None, "Enter must be blocked on engine turn");
+    game.cursor = Square::E7;
+    key(&mut game, KeyCode::Char('k'));
+    assert_eq!(game.cursor, Square::E8, "cursor movement stays enabled");
+    key(&mut game, KeyCode::Char('N'));
+    assert!(game.versus_engine);
+    assert_eq!(game.position, Chess::default(), "restart resets the board");
+}
+
+#[test]
+fn engine_switch_sides_toggles_and_restarts() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    assert!(game.versus_engine);
+    assert_eq!(game.engine_side, shakmaty::Color::Black);
+    game.switch_sides();
+    assert_eq!(game.engine_side, shakmaty::Color::White);
+    assert_eq!(game.position, Chess::default());
+}
+
+fn temp_nonexecutable() -> std::path::PathBuf {
+    let dir = std::env::temp_dir();
+    let path = dir.join(format!("fake_engine_noexec_{}", std::process::id()));
+    std::fs::write(&path, b"#!/bin/sh\nexit 0\n").unwrap();
+    let mut perms = std::fs::metadata(&path).unwrap().permissions();
+    perms.set_mode(0o000);
+    std::fs::set_permissions(&path, perms).unwrap();
+    path
+}
+
+fn engine_lookup_root() -> std::path::PathBuf {
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!("chess_lookup_{}_{}", std::process::id(), n));
+    std::fs::create_dir_all(&root).unwrap();
+    root
+}
+
+fn engine_lookup_temp_tree(root: &std::path::Path, with_sibling: bool, with_staged: bool) {
+    let bin = root.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    if with_sibling {
+        std::fs::write(bin.join("stockfish"), b"x").unwrap();
+    }
+    let staged = root.join("src/third_party/stockfish/bundle");
+    if with_staged {
+        std::fs::create_dir_all(&staged).unwrap();
+        std::fs::write(staged.join("stockfish-macos-universal"), b"x").unwrap();
+    }
+}
+
+#[test]
+fn engine_missing_and_nonexecutable_are_graceful_errors() {
+    let _guard = engine_lock();
+    // Missing path: spawn fails.
+    assert!(crate::engine::Engine::spawn(Path::new("/nonexistent/stockfish")).is_err());
+    // Non-executable file: spawn is refused.
+    let path = temp_nonexecutable();
+    let err = crate::engine::Engine::spawn(&path)
+        .err()
+        .expect("spawn error");
+    assert!(!err.message().is_empty());
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn engine_silent_uciok_times_out() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "no-uci");
+    }
+    let err = Engine::spawn(Path::new(&fake_engine_path()))
+        .err()
+        .expect("startup error");
+    assert!(
+        err.message().contains("startup failed"),
+        "{}",
+        err.message()
+    );
+}
+
+#[test]
+fn engine_delayed_handshake_still_starts() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "delayed");
+    }
+    let engine = Engine::spawn(Path::new(&fake_engine_path())).expect("starts despite delay");
+    drop(engine);
+}
+
+#[test]
+fn engine_early_exit_is_reported() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "early-exit");
+    }
+    let err = Engine::spawn(Path::new(&fake_engine_path()))
+        .err()
+        .expect("startup error");
+    assert!(err.message().contains("startup failed") || err.message().contains("protocol"));
+}
+
+#[test]
+fn engine_delayed_bestmove_eventually_arrives() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "slow");
+    }
+    let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+    engine.start_search(START_FEN).expect("search start");
+    assert!(
+        engine.try_bestmove().is_none(),
+        "must still be pending immediately"
+    );
+    let mv = wait_bestmove(&mut engine, Duration::from_secs(3)).expect("bestmove");
+    assert_eq!(mv, "e2e4");
+}
+
+#[test]
+fn engine_malformed_bestmove_is_rejected() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "malformed");
+    }
+    let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+    engine.start_search(START_FEN).expect("search start");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut rejected = false;
+    while Instant::now() < deadline {
+        match engine.try_bestmove() {
+            Some(Ok(mv)) => {
+                assert!(
+                    UciMove::from_ascii(mv.as_bytes()).is_err(),
+                    "malformed move parsed"
+                );
+                rejected = true;
+                break;
+            }
+            Some(Err(_)) => {
+                rejected = true;
+                break;
+            }
+            None => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
+    assert!(rejected, "malformed bestmove not rejected");
+}
+
+#[test]
+fn special_moves_convert_through_game_play() {
+    // Promotion: a7 pawn promotes to a queen.
+    let mut game = position("4k3/P7/8/8/8/8/8/4K3 w - - 0 1");
+    let m = UciMove::from_ascii(b"a7a8q")
+        .unwrap()
+        .to_move(&game.position)
+        .unwrap();
+    game.play(m);
+    assert_eq!(
+        game.position.board().piece_at(Square::A8).unwrap().role,
+        Role::Queen
+    );
+
+    // Castling kingside: king e1 to g1, rook to f1.
+    let mut game = position("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
+    let m = UciMove::from_ascii(b"e1g1")
+        .unwrap()
+        .to_move(&game.position)
+        .unwrap();
+    game.play(m);
+    assert_eq!(
+        game.position.board().piece_at(Square::G1).unwrap().role,
+        Role::King
+    );
+    assert_eq!(
+        game.position.board().piece_at(Square::F1).unwrap().role,
+        Role::Rook
+    );
+
+    // En passant capture: e5 takes d5 en passant.
+    let mut game = position("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1");
+    let m = UciMove::from_ascii(b"e5d6")
+        .unwrap()
+        .to_move(&game.position)
+        .unwrap();
+    game.play(m);
+    assert!(game.position.board().piece_at(Square::D5).is_none());
+    assert_eq!(
+        game.position.board().piece_at(Square::D6).unwrap().role,
+        Role::Pawn
+    );
+}
+
+#[test]
+fn engine_quit_while_thinking_reaps_child() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "slow");
+    }
+    let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+    engine.start_search(START_FEN).expect("search start");
+    std::thread::sleep(Duration::from_millis(200));
+    drop(engine); // quit during thinking; sleeping fake is killed, then reaped
+}
+
+#[test]
+fn engine_restart_while_thinking_starts_fresh_search() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "");
+    }
+    let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+    // Engine starts searching the initial position (would answer e2e4).
+    engine.start_search(START_FEN).expect("search start");
+    std::thread::sleep(Duration::from_millis(100));
+    // Restart resets the game; the in-flight search must be cancelled.
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    drive_engine(&mut engine, &mut game);
+    assert!(!engine.is_searching(), "stale search must be cancelled");
+    assert!(
+        engine.last_fen().is_none(),
+        "stale search fen must be cleared"
+    );
+    // Human moves first, then the engine searches the fresh position.
+    let m = UciMove::from_ascii(b"d2d4")
+        .unwrap()
+        .to_move(&game.position)
+        .unwrap();
+    game.play(m);
+    drive_engine(&mut engine, &mut game);
+    assert_eq!(
+        engine.last_fen().map(|fen| fen.contains(" b ")),
+        Some(true),
+        "engine must search the fresh black-to-move position"
+    );
+    let mv = wait_bestmove(&mut engine, Duration::from_secs(3)).expect("bestmove");
+    assert_eq!(mv, "e7e5");
+}
+
+#[test]
+fn engine_error_marks_game_failed_without_retry_loop() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "illegal");
+    }
+    let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    let m = UciMove::from_ascii(b"e2e4")
+        .unwrap()
+        .to_move(&game.position)
+        .unwrap();
+    game.play(m);
+    for _ in 0..100 {
+        drive_engine(&mut engine, &mut game);
+        if game.engine_failed {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(game.engine_failed, "engine failure must be latched");
+    assert!(
+        game.engine_status.contains("illegal move"),
+        "{}",
+        game.engine_status
+    );
+    drive_engine(&mut engine, &mut game);
+    assert!(game.engine_failed, "failed engine must not be retried");
+}
+
+#[test]
+fn repeated_spawn_drop_reaps_children() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "ignore-quit");
+    }
+    for _ in 0..3 {
+        let engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+        drop(engine);
+    }
+}
+
+#[test]
 fn layout_at_minimum_size_and_resize_guidance() {
     let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
     let mut game = Game::default();
@@ -599,11 +1456,13 @@ fn layout_at_minimum_size_and_resize_guidance() {
         "Local two-player",
         "white to move",
         "Recent moves",
-        "Esc: cancel",
-        "Yellow box: selected",
-        "Green: legal",
-        "Blue: last move",
-        "d: claim draw",
+        "Esc cancel",
+        "Enter move",
+        "corners=cursor",
+        "gold=selected",
+        "green=legal",
+        "amber=capture",
+        "blue=last",
     ] {
         assert!(text.contains(expected), "missing {expected}");
     }
@@ -611,7 +1470,7 @@ fn layout_at_minimum_size_and_resize_guidance() {
     assert!(!text.contains("Pawn _"));
     let buffer = terminal.backend().buffer();
     let (gx, gy) = sq(4, 4);
-    assert_eq!(buffer[(gx + 1, gy + 1)].bg, Color::Rgb(80, 150, 80));
+    assert_eq!(buffer[(gx + 7, gy + 3)].bg, Color::Rgb(60, 200, 60));
     terminal.backend_mut().resize(60, 20);
     draw_terminal(&mut terminal, &game);
     let text = buffer_text(&terminal);

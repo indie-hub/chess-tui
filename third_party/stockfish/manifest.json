@@ -1,0 +1,57 @@
+{
+  "stockfish": {
+    "version": "19",
+    "tag": "sf_19",
+    "commit": "edb0d9db6731067ec50ce619ff372b463bc4dd5d",
+    "published_at": "2026-09-05T08:33:17Z",
+    "bench_nodes": 2497913
+  },
+  "official_sources": {
+    "stockfishchess_download_page": "https://stockfishchess.org/download/",
+    "github_repo": "https://github.com/official-stockfish/Stockfish",
+    "github_release_tag": "https://github.com/official-stockfish/Stockfish/releases/tag/sf_19"
+  },
+  "binary_archive": {
+    "durable_url": "https://github.com/official-stockfish/Stockfish/releases/download/sf_19/stockfish-macos-universal.tar.gz",
+    "requested_url": "https://github.com/official-stockfish/Stockfish/releases/latest/download/stockfish-macos-universal.tar.gz",
+    "size_bytes": 82323876,
+    "sha256": "a1f0e3bcc5a6927a11fe6fc8e54a779754645f3c2bae2cf13420fd1957adaa77",
+    "archive_top_prefix": "stockfish/",
+    "executable_in_archive": "stockfish/stockfish-macos-universal",
+    "executable_sha256": "8eed61129d1493c5d1f2fd9323f0c54c47ac49319911fbde18c6b9c87e8b13c5",
+    "architectures": ["x86_64", "arm64"],
+    "universal": true,
+    "executable_size_bytes": 105458632
+  },
+  "source_archive": {
+    "durable_url": "https://github.com/official-stockfish/Stockfish/archive/refs/tags/sf_19.zip",
+    "codeload_url": "https://codeload.github.com/official-stockfish/Stockfish/zip/refs/tags/sf_19",
+    "alternate_tar_gz_url": "https://github.com/official-stockfish/Stockfish/archive/refs/tags/sf_19.tar.gz",
+    "alternate_codeload_tgz": "https://codeload.github.com/official-stockfish/Stockfish/tar.gz/refs/tags/sf_19",
+    "size_bytes": 373314,
+    "sha256": "024a509d7af387218bd59c559473a71a1d6b411885010543891495119a671119",
+    "alternate_size_bytes": 291206,
+    "alternate_sha256": "519b653d0d1ffb96531d982ccbe5c6a19425e8388e0e3c2f70f34b424ab32d76",
+    "top_prefix": "Stockfish-sf_19/",
+    "tag": "sf_19",
+    "commit": "edb0d9db6731067ec50ce619ff372b463bc4dd5d"
+  },
+  "license": {
+    "spdx": "GPL-3.0-only",
+    "file": "Copying.txt",
+    "size_bytes": 35149,
+    "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "source": "https://raw.githubusercontent.com/official-stockfish/Stockfish/sf_19/Copying.txt",
+    "present_in_both_archives": true
+  },
+  "authenticity": {
+    "official_signature_published": false,
+    "verification": "HTTPS origin (stockfishchess.org via Cloudflare, github.com via TLS -> release-assets Azure signed URL) + locally computed SHA-256; no GPG/signature file published for sf_19"
+  },
+  "bundle": {
+    "staging_dir": "third_party/stockfish/bundle",
+    "executable": "third_party/stockfish/bundle/stockfish-macos-universal",
+    "cache_dir": "third_party/stockfish/cache",
+    "gitignored": true
+  }
+}

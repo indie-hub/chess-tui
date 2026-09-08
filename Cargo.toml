@@ -2,6 +2,7 @@
 name = "chess-tui"
 version = "0.1.0"
 edition = "2024"
+default-run = "chess-tui"
 
 [dependencies]
 ratatui = "0.30"
@@ -11,3 +12,7 @@ shakmaty = "0.30"
 [dev-dependencies]
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 sha2 = "0.10"
+
+[[bin]]
+name = "fake_engine"
+path = "src/bin/fake_engine.rs"

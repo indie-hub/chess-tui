@@ -13,7 +13,7 @@ use crate::game::{Game, destination};
 use crate::sprites::{SPRITE_SIZE, sprite_pixels};
 
 pub(crate) const MIN_WIDTH: u16 = 170;
-pub(crate) const MIN_HEIGHT: u16 = 72;
+pub(crate) const MIN_HEIGHT: u16 = 68;
 // Each square is 16 columns wide and 8 rows tall of terminal cells: a 16x16
 // sprite occupies 16 columns (one sprite pixel per cell width) and 8 rows
 // (two sprite pixel rows per half-block cell).
@@ -27,10 +27,20 @@ pub(crate) const BOARD_Y: u16 = 1;
 pub(crate) const PANEL_X: u16 = 134;
 pub(crate) const PANEL_WIDTH: u16 = 34;
 
-// Selected square outline and cursor corners. Both are high-contrast against
-// the mid-tone square colours and against the piece artwork.
+// Square decorations. All are high-contrast against the mid-tone square
+// colours, the marker colour and the piece artwork.
 const SELECTED_OUTLINE: [u8; 3] = [255, 210, 40];
-const CURSOR_OUTLINE: [u8; 3] = [255, 255, 255];
+const CURSOR_OUTLINE: [u8; 3] = [0, 220, 255];
+const CAPTURE_OUTLINE: [u8; 3] = [230, 80, 20];
+const LEGAL_MARKER: [u8; 3] = [60, 200, 60];
+const LAST_MOVE_OUTLINE: [u8; 3] = [90, 130, 205];
+
+// Center of a 16x8 square for the empty-legal marker: a 4x4 centred block that
+// covers <=25% of the square and keeps the base colour visible around it.
+const MARKER_CX0: u16 = 6;
+const MARKER_CX1: u16 = 9;
+const MARKER_CY0: u16 = 2;
+const MARKER_CY1: u16 = 5;
 
 #[cfg(test)]
 pub(crate) fn sprite_bytes(side: Side, role: Role) -> &'static [u8] {
@@ -141,27 +151,33 @@ pub(crate) fn base_bg(row: u16, file: u16) -> [u8; 3] {
     }
 }
 
-fn square_bg(game: &Game, legal: &[Move], square: Square, row: u16, file: u16) -> [u8; 3] {
-    if game.selected.is_some()
-        && legal
-            .iter()
-            .any(|m| m.from() == game.selected && destination(*m) == square)
-    {
-        [80, 150, 80]
-    } else if game
-        .last_move
-        .is_some_and(|(a, b)| a == square || b == square)
-    {
-        [80, 120, 190]
-    } else {
-        base_bg(row, file)
+#[derive(Clone, Copy, PartialEq)]
+enum Decor {
+    Selected,
+    Capture,
+    Legal,
+    LastMove,
+    None,
+}
+
+fn capitalize(word: &str) -> String {
+    let mut chars = word.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
     }
 }
 
-// Build one square as 8 lines of 16 cells. The selected square is framed by a
-// full box-drawing outline (the interior keeps its exact sprite pixels); a
-// cursor without a selection is marked with four small corner brackets. Legal
-// destinations and last-move squares keep their green/blue fill.
+fn marker_span(color: [u8; 3]) -> Span<'static> {
+    Span::styled(" ", Style::default().fg(to_rgb(color)).bg(to_rgb(color)))
+}
+
+// Build one square as 8 lines of 16 cells. Decoration precedence is: the
+// selected square gets a full gold outline, a capturable destination gets a
+// thin amber outline (the piece stays exact inside), an empty legal
+// destination gets a small centred green marker, and a last-move square gets a
+// subtle blue outline. A cursor without a selection keeps four white corner
+// brackets drawn on top.
 fn square_lines(
     game: &Game,
     legal: &[Move],
@@ -169,8 +185,32 @@ fn square_lines(
     row: u16,
     file: u16,
 ) -> Vec<Line<'static>> {
-    let bg = square_bg(game, legal, square, row, file);
+    let bg = base_bg(row, file);
     let selected = game.selected == Some(square);
+    let legal_dest = game.selected.is_some()
+        && legal
+            .iter()
+            .any(|m| m.from() == game.selected && destination(*m) == square);
+    // A capture destination is any legal move into this square that captures
+    // (including en passant, whose destination square is empty).
+    let capture_dest = game.selected.is_some()
+        && legal.iter().any(|m| {
+            m.from() == game.selected && destination(*m) == square && m.capture().is_some()
+        });
+    let last_move = game
+        .last_move
+        .is_some_and(|(a, b)| a == square || b == square);
+    let decor = if selected {
+        Decor::Selected
+    } else if capture_dest {
+        Decor::Capture
+    } else if legal_dest {
+        Decor::Legal
+    } else if last_move {
+        Decor::LastMove
+    } else {
+        Decor::None
+    };
     let cursor = game.cursor == square && !selected;
     let data = game
         .position
@@ -185,10 +225,16 @@ fn square_lines(
                         cx == 0 || cx == SQUARE_W - 1 || cy == 0 || cy == SQUARE_H - 1;
                     let on_corner =
                         (cx == 0 || cx == SQUARE_W - 1) && (cy == 0 || cy == SQUARE_H - 1);
-                    if selected && on_perimeter {
+                    let in_marker = (MARKER_CX0..=MARKER_CX1).contains(&cx)
+                        && (MARKER_CY0..=MARKER_CY1).contains(&cy);
+                    let span = if decor == Decor::Selected && on_perimeter {
                         outline_span(cx, cy, SELECTED_OUTLINE, bg)
-                    } else if cursor && on_corner {
-                        outline_span(cx, cy, CURSOR_OUTLINE, bg)
+                    } else if decor == Decor::Capture && on_perimeter {
+                        outline_span(cx, cy, CAPTURE_OUTLINE, bg)
+                    } else if decor == Decor::Legal && in_marker {
+                        marker_span(LEGAL_MARKER)
+                    } else if decor == Decor::LastMove && on_perimeter {
+                        outline_span(cx, cy, LAST_MOVE_OUTLINE, bg)
                     } else {
                         match data {
                             Some(pixels) => cell_span(
@@ -197,6 +243,11 @@ fn square_lines(
                             ),
                             None => cell_span(bg, bg),
                         }
+                    };
+                    if cursor && on_corner {
+                        outline_span(cx, cy, CURSOR_OUTLINE, bg)
+                    } else {
+                        span
                     }
                 })
                 .collect();
@@ -277,6 +328,12 @@ fn draw_panel(frame: &mut Frame, game: &Game) {
         ),
         Rect::new(PANEL_X, 5, PANEL_WIDTH, 13),
     );
+    if !game.engine_status.is_empty() {
+        frame.render_widget(
+            Paragraph::new(game.engine_status.as_str()).wrap(Wrap { trim: true }),
+            Rect::new(PANEL_X, 19, PANEL_WIDTH, 4),
+        );
+    }
 }
 
 pub(crate) fn draw(frame: &mut Frame, game: &Game) {
@@ -292,10 +349,13 @@ pub(crate) fn draw(frame: &mut Frame, game: &Game) {
         return;
     }
     let full = area.width.saturating_sub(2);
-    frame.render_widget(
-        Paragraph::new("CHESS  |  Local two-player game"),
-        Rect::new(1, 0, full, 1),
-    );
+    let header = if game.versus_engine && !game.engine_failed {
+        let human = capitalize(&game.engine_side.other().to_string());
+        format!("CHESS  |  You: {human} vs Stockfish")
+    } else {
+        "CHESS  |  Local two-player".into()
+    };
+    frame.render_widget(Paragraph::new(header), Rect::new(1, 0, full, 1));
     let legal = if game.ending().is_none() {
         game.position.legal_moves()
     } else {
@@ -303,24 +363,19 @@ pub(crate) fn draw(frame: &mut Frame, game: &Game) {
     };
     draw_board(frame, game, &legal);
     draw_panel(frame, game);
-    let claim = if game.ending().is_none() && game.claimable() {
-        "Draw available: press d"
-    } else {
-        "d: claim draw (also intended move)"
-    };
-    frame.render_widget(Paragraph::new(claim), Rect::new(1, 66, full, 1));
-    frame.render_widget(
-        Paragraph::new(game.notice.as_str()),
-        Rect::new(1, 67, full, 1),
-    );
-    frame.render_widget(
-        Paragraph::new("Arrows/hjkl: cursor  Enter: select/move  Esc: cancel  N: new  q: quit"),
-        Rect::new(1, 68, full, 1),
-    );
+    // Footer is at most two lines: one compact controls+legend line and a
+    // dynamic line. The dynamic line shows the draw-availability hint only
+    // when a draw claim is live and no other feedback is pending.
     frame.render_widget(
         Paragraph::new(
-            "White corners: cursor  Yellow box: selected  Green: legal  Blue: last move",
+            "Arrows/hjkl cursor  Enter move  Esc cancel  N new  s sides  d draw  q quit | corners=cursor gold=selected green=legal amber=capture blue=last",
         ),
-        Rect::new(1, 69, full, 1),
+        Rect::new(1, 66, full, 1),
     );
+    let dynamic = if game.ending().is_none() && game.claimable() && game.notice.is_empty() {
+        "Draw available: press d"
+    } else {
+        game.notice.as_str()
+    };
+    frame.render_widget(Paragraph::new(dynamic), Rect::new(1, 67, full, 1));
 }

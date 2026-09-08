@@ -3,6 +3,7 @@
 
 # Rust build output
 /target/
+/.worktrees/
 
 # Local agent and indexing state
 /.agents/
@@ -20,6 +21,11 @@
 
 # Local validation captures
 /screenshots/
+
+# Stockfish 19 macOS universal bundle — gitignored staging (never commit 105 MB binary or archives)
+# Pin remains tracked in third_party/stockfish/manifest.json + Copying.txt + SOURCE_POINTER.txt
+/third_party/stockfish/bundle/
+/third_party/stockfish/cache/
 
 # macOS
 .DS_Store

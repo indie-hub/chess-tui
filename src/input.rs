@@ -8,6 +8,20 @@ impl Game {
         if key.kind != KeyEventKind::Press {
             return false;
         }
+        // On the engine's turn only cursor, quit, restart and side-switch are
+        // accepted; piece-selection, promotion and draw keys stay blocked.
+        if self.engine_to_move()
+            && !matches!(
+                key.code,
+                KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Up
+                    | KeyCode::Down
+                    | KeyCode::Char('h' | 'j' | 'k' | 'l' | 'q' | 'N' | 's')
+            )
+        {
+            return false;
+        }
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             return true;
         }
@@ -38,7 +52,15 @@ impl Game {
                 (i32::from(self.cursor.file()), i32::from(self.cursor.rank()));
             match key.code {
                 KeyCode::Char('q') => return true,
-                KeyCode::Char('N') => *self = Self::default(),
+                KeyCode::Char('N') => {
+                    let side = self.engine_side;
+                    *self = if self.versus_engine {
+                        Self::new_vs_engine(side)
+                    } else {
+                        Self::default()
+                    };
+                }
+                KeyCode::Char('s') if self.versus_engine => self.switch_sides(),
                 KeyCode::Char('d') => self.claim_draw(),
                 KeyCode::Enter => self.select(),
                 KeyCode::Left | KeyCode::Char('h') => file -= 1,

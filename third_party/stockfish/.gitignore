@@ -1,0 +1,10 @@
+# gitignored staging — never commit the 105 MB universal binary or archives
+/bundle/
+/cache/
+*.tar.gz
+*.zip
+# keep metadata tracked
+!*.json
+!*.txt
+!*.md
+!.gitignore
