@@ -171,78 +171,71 @@ fn capitalize(word: &str) -> String {
     }
 }
 
-// Compact one-cell figurine for a captured piece. A piece White captured was a
-// black piece, so its glyph is the filled black figurine; the reverse holds for
-// Black's captures.
-fn role_glyph(color: Side, role: Role) -> char {
-    match (color, role) {
-        (Side::White, Role::King) => '♔',
-        (Side::White, Role::Queen) => '♕',
-        (Side::White, Role::Rook) => '♖',
-        (Side::White, Role::Bishop) => '♗',
-        (Side::White, Role::Knight) => '♘',
-        (Side::White, Role::Pawn) => '♙',
-        (Side::Black, Role::King) => '♚',
-        (Side::Black, Role::Queen) => '♛',
-        (Side::Black, Role::Rook) => '♜',
-        (Side::Black, Role::Bishop) => '♝',
-        (Side::Black, Role::Knight) => '♞',
-        (Side::Black, Role::Pawn) => '♟',
+// Captured-role counts in fixed Q R B N P order. Zero counts stay visible so
+// both rows always have the same shape and a clean material read at a glance.
+fn captured_counts(roles: &[Role]) -> [usize; 5] {
+    let mut counts = [0usize; 5];
+    for &role in roles {
+        match role {
+            Role::Queen => counts[0] += 1,
+            Role::Rook => counts[1] += 1,
+            Role::Bishop => counts[2] += 1,
+            Role::Knight => counts[3] += 1,
+            Role::Pawn => counts[4] += 1,
+            Role::King => {}
+        }
     }
+    counts
 }
 
-// One figurine span per captured piece, coloured so the filled black glyphs and
-// the outline white glyphs both stay readable on a dark terminal background.
-fn captured_spans(roles: &[Role], piece_color: Side) -> Vec<Span<'static>> {
-    let fg = match piece_color {
-        Side::White => [255, 255, 255],
-        Side::Black => [150, 150, 150],
-    };
-    roles
-        .iter()
-        .map(|&role| {
-            Span::styled(
-                role_glyph(piece_color, role).to_string(),
-                Style::default().fg(to_rgb(fg)),
-            )
-        })
-        .collect()
+fn captured_row(label: &'static str, label_color: [u8; 3], counts: [usize; 5]) -> Line<'static> {
+    let mut spans = vec![Span::styled(
+        label,
+        Style::default().fg(to_rgb(label_color)),
+    )];
+    spans.push(Span::raw("  "));
+    for (letter, &count) in ['Q', 'R', 'B', 'N', 'P'].iter().zip(counts.iter()) {
+        spans.push(Span::styled(
+            format!("{letter}{count}"),
+            Style::default().fg(to_rgb([200, 200, 200])),
+        ));
+        spans.push(Span::raw(" "));
+    }
+    spans.pop();
+    Line::from(spans)
 }
 
 fn draw_material(frame: &mut Frame, game: &Game) {
-    let mut white = vec![Span::styled(
+    let white = captured_row(
         "White",
-        Style::default().fg(to_rgb([255, 255, 255])),
-    )];
-    white.push(Span::raw(" "));
-    white.extend(captured_spans(game.captured_by(Side::White), Side::Black));
-    let mut black = vec![Span::styled(
+        [255, 255, 255],
+        captured_counts(game.captured_by(Side::White)),
+    );
+    let black = captured_row(
         "Black",
-        Style::default().fg(to_rgb([150, 150, 150])),
-    )];
-    black.push(Span::raw(" "));
-    black.extend(captured_spans(game.captured_by(Side::Black), Side::White));
+        [150, 150, 150],
+        captured_counts(game.captured_by(Side::Black)),
+    );
     let balance = game.material_balance();
     let balance_span = if balance > 0 {
         Span::styled(
-            format!("White +{balance}"),
+            format!("Material +{balance}"),
             Style::default().fg(to_rgb([255, 210, 40])),
         )
     } else if balance < 0 {
         Span::styled(
-            format!("Black +{}", -balance),
+            format!("Material -{}", -balance),
             Style::default().fg(to_rgb([0, 220, 255])),
         )
     } else {
-        Span::styled("Equal", Style::default().fg(to_rgb([150, 150, 150])))
+        Span::styled(
+            "Material even",
+            Style::default().fg(to_rgb([150, 150, 150])),
+        )
     };
     frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(white),
-            Line::from(black),
-            Line::from(balance_span),
-        ])
-        .block(Block::default().title(" Captured ").borders(Borders::ALL)),
+        Paragraph::new(vec![white, black, Line::from(balance_span)])
+            .block(Block::default().title(" Captured ").borders(Borders::ALL)),
         Rect::new(PANEL_X, MATERIAL_Y, PANEL_WIDTH, MATERIAL_H),
     );
 }
