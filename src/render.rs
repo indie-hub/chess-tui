@@ -36,6 +36,7 @@ pub(crate) const MATERIAL_H: u16 = 6;
 // colours, the marker colour and the piece artwork.
 const SELECTED_OUTLINE: [u8; 3] = [255, 210, 40];
 const CURSOR_OUTLINE: [u8; 3] = [80, 255, 255];
+const CHECK_OUTLINE: [u8; 3] = [255, 55, 55];
 const CAPTURE_OUTLINE: [u8; 3] = [230, 80, 20];
 const LEGAL_MARKER: [u8; 3] = [60, 200, 60];
 const LAST_MOVE_OUTLINE: [u8; 3] = [90, 130, 205];
@@ -159,6 +160,7 @@ pub(crate) fn base_bg(row: u16, file: u16) -> [u8; 3] {
 #[derive(Clone, Copy, PartialEq)]
 enum Decor {
     Selected,
+    Check,
     Capture,
     Legal,
     LastMove,
@@ -273,8 +275,12 @@ fn square_lines(
     let last_move = game
         .last_move
         .is_some_and(|(a, b)| a == square || b == square);
+    let checked_king = game.position.is_check()
+        && game.position.board().king_of(game.position.turn()) == Some(square);
     let decor = if selected {
         Decor::Selected
+    } else if checked_king {
+        Decor::Check
     } else if capture_dest {
         Decor::Capture
     } else if legal_dest {
@@ -304,6 +310,8 @@ fn square_lines(
                         && (MARKER_CY0..=MARKER_CY1).contains(&cy);
                     let span = if decor == Decor::Selected && on_perimeter {
                         outline_span(cx, cy, SELECTED_OUTLINE, bg)
+                    } else if decor == Decor::Check && on_perimeter {
+                        outline_span(cx, cy, CHECK_OUTLINE, bg)
                     } else if decor == Decor::Capture && on_perimeter {
                         outline_span(cx, cy, CAPTURE_OUTLINE, bg)
                     } else if decor == Decor::Legal && in_marker {

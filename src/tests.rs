@@ -633,6 +633,19 @@ fn selection_takes_precedence_over_last_move_outline() {
 }
 
 #[test]
+fn checked_king_shows_red_outline() {
+    let game = position("4k3/4R3/8/8/8/8/8/4K3 b - - 0 1");
+    assert!(game.position.is_check());
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    let (x, y) = sq(4, 0);
+    assert_eq!(buffer[(x, y)].symbol(), "┌");
+    assert_eq!(buffer[(x + 5, y)].symbol(), "─");
+    assert_eq!(buffer[(x + 5, y)].fg, Color::Rgb(255, 55, 55));
+}
+
+#[test]
 fn cursor_on_legal_destination_shows_white_corners_and_marker() {
     let mut game = Game::default();
     key(&mut game, KeyCode::Enter); // select e2

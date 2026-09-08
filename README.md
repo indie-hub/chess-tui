@@ -71,7 +71,8 @@ interior keeps the exact sprite pixels), a cursor without a selection is marked
 with bright cyan three-cell corner brackets, empty legal destinations get a small
 centred green marker (no more than a quarter of the square, with the base
 colour visible around it), capturable destinations get a thin red-orange
-outline, and last-move squares get a subtle blue outline. The human side is
+outline, last-move squares get a subtle blue outline, and a king in check gets
+a clear red outline. The human side is
 always shown at the bottom when playing Stockfish.
 
 **Size tradeoff.** A 16x16 sprite maps to a 16-column by 8-row cell block (one
