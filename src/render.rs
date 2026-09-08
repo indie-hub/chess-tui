@@ -28,7 +28,7 @@ pub(crate) const PANEL_WIDTH: u16 = 34;
 // 19-22 only when a status is present; the block never overlaps it, the
 // "Recent moves" block (rows 5-17) or the two-line footer (rows 66-67).
 pub(crate) const MATERIAL_Y: u16 = 24;
-pub(crate) const MATERIAL_H: u16 = 5;
+pub(crate) const MATERIAL_H: u16 = 6;
 
 // Square decorations. All are high-contrast against the mid-tone square
 // colours, the marker colour and the piece artwork.
@@ -171,8 +171,7 @@ fn capitalize(word: &str) -> String {
     }
 }
 
-// Captured-role counts in fixed Q R B N P order. Zero counts stay visible so
-// both rows always have the same shape and a clean material read at a glance.
+// Captured-role counts in fixed Q R B N P order.
 fn captured_counts(roles: &[Role]) -> [usize; 5] {
     let mut counts = [0usize; 5];
     for &role in roles {
@@ -188,54 +187,54 @@ fn captured_counts(roles: &[Role]) -> [usize; 5] {
     counts
 }
 
-fn captured_row(label: &'static str, label_color: [u8; 3], counts: [usize; 5]) -> Line<'static> {
-    let mut spans = vec![Span::styled(
-        label,
-        Style::default().fg(to_rgb(label_color)),
-    )];
-    spans.push(Span::raw("  "));
-    for (letter, &count) in ['Q', 'R', 'B', 'N', 'P'].iter().zip(counts.iter()) {
-        spans.push(Span::styled(
-            format!("{letter}{count}"),
-            Style::default().fg(to_rgb([200, 200, 200])),
-        ));
-        spans.push(Span::raw(" "));
+// Compact capture summary in stable Q R B N P order: a single role as its
+// letter, duplicates as "P×3", an empty set as an em dash. The longest real
+// line ("Q R B N P×11") still fits the 32 interior columns.
+fn captured_summary(counts: [usize; 5]) -> String {
+    let letters = ['Q', 'R', 'B', 'N', 'P'];
+    let parts: Vec<String> = counts
+        .iter()
+        .zip(letters.iter())
+        .filter(|(count, _)| **count > 0)
+        .map(|(count, &letter)| {
+            if *count == 1 {
+                letter.to_string()
+            } else {
+                format!("{letter}×{count}")
+            }
+        })
+        .collect();
+    if parts.is_empty() {
+        "—".to_string()
+    } else {
+        parts.join(" ")
     }
-    spans.pop();
-    Line::from(spans)
 }
 
 fn draw_material(frame: &mut Frame, game: &Game) {
-    let white = captured_row(
-        "White",
-        [255, 255, 255],
-        captured_counts(game.captured_by(Side::White)),
+    let white = format!(
+        "W: {}",
+        captured_summary(captured_counts(game.captured_by(Side::White)))
     );
-    let black = captured_row(
-        "Black",
-        [150, 150, 150],
-        captured_counts(game.captured_by(Side::Black)),
+    let black = format!(
+        "B: {}",
+        captured_summary(captured_counts(game.captured_by(Side::Black)))
     );
     let balance = game.material_balance();
-    let balance_span = if balance > 0 {
-        Span::styled(
-            format!("Material +{balance}"),
-            Style::default().fg(to_rgb([255, 210, 40])),
-        )
+    let balance_line = if balance > 0 {
+        format!("White +{balance}")
     } else if balance < 0 {
-        Span::styled(
-            format!("Material -{}", -balance),
-            Style::default().fg(to_rgb([0, 220, 255])),
-        )
+        format!("Black +{}", -balance)
     } else {
-        Span::styled(
-            "Material even",
-            Style::default().fg(to_rgb([150, 150, 150])),
-        )
+        "Even".to_string()
     };
     frame.render_widget(
-        Paragraph::new(vec![white, black, Line::from(balance_span)])
-            .block(Block::default().title(" Captured ").borders(Borders::ALL)),
+        Paragraph::new(vec![
+            Line::from(white),
+            Line::from(black),
+            Line::from(balance_line),
+        ])
+        .block(Block::default().title(" Material ").borders(Borders::ALL)),
         Rect::new(PANEL_X, MATERIAL_Y, PANEL_WIDTH, MATERIAL_H),
     );
 }

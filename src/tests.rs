@@ -778,24 +778,15 @@ fn long_engine_status_wraps_in_panel() {
 }
 
 #[test]
-fn material_panel_start_state_zero_groups_and_even() {
+fn material_panel_start_state_dash_and_even() {
     let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
     let game = Game::default();
     draw_terminal(&mut terminal, &game);
     let text = buffer_text(&terminal);
-    assert!(text.contains("Captured"), "material block title");
-    assert!(
-        text.contains("White  Q0 R0 B0 N0 P0"),
-        "start white row has zero groups"
-    );
-    assert!(
-        text.contains("Black  Q0 R0 B0 N0 P0"),
-        "start black row has zero groups"
-    );
-    assert!(
-        text.contains("Material even"),
-        "equal state shown unambiguously"
-    );
+    assert!(text.contains("Material"), "material block title");
+    assert!(text.contains("W: —"), "start white row is empty dash");
+    assert!(text.contains("B: —"), "start black row is empty dash");
+    assert!(text.contains("Even"), "equal state shown unambiguously");
 }
 
 #[test]
@@ -806,31 +797,35 @@ fn material_panel_ordinary_capture_changes_balance() {
     draw_terminal(&mut terminal, &game);
     let text = buffer_text(&terminal);
     assert!(
-        text.contains("White  Q0 R0 B0 N0 P1"),
-        "white captured pawn visible in white row"
+        text.contains("W: P"),
+        "white captured pawn visible as single P"
     );
+    assert!(text.contains("B: —"), "black row still empty dash");
     assert!(
-        text.contains("Black  Q0 R0 B0 N0 P0"),
-        "black row still has zero groups"
-    );
-    assert!(
-        text.contains("Material +1"),
+        text.contains("White +1"),
         "signed balance for white capture"
     );
 }
 
 #[test]
-fn material_panel_queen_capture_ordering_and_plus_nine() {
-    let mut game = position("4k3/8/8/2q5/3P4/8/8/4K3 w - - 0 1");
-    move_uci(&mut game, "d4c5");
+fn material_panel_multi_capture_sorts_and_counts() {
+    // Two pawns and a queen captured by White. Backend capture tracking is
+    // covered in game.rs; here we exercise the panel's grouping format.
+    let game = Game {
+        captured_by_white: vec![Role::Pawn, Role::Pawn, Role::Queen],
+        ..Game::default()
+    };
     let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
     draw_terminal(&mut terminal, &game);
     let text = buffer_text(&terminal);
     assert!(
-        text.contains("White  Q1 R0 B0 N0 P0"),
-        "queen count appears first in Q R B N P order"
+        text.contains("W: Q P×2"),
+        "multi-capture sorts Q R B N P and counts duplicate roles"
     );
-    assert!(text.contains("Material +9"), "queen capture balance is +9");
+    assert!(
+        text.contains("White +11"),
+        "queen plus two pawns balance is 9 + 1 + 1 = 11"
+    );
 }
 
 #[test]
@@ -841,11 +836,11 @@ fn material_panel_black_advantage_and_local_mode() {
     draw_terminal(&mut terminal, &game);
     let text = buffer_text(&terminal);
     assert!(
-        text.contains("Black  Q0 R0 B0 N0 P1"),
+        text.contains("B: P"),
         "black-captured white pawn shown in black row"
     );
     assert!(
-        text.contains("Material -1"),
+        text.contains("Black +1"),
         "signed balance for black capture"
     );
     assert!(text.contains("Local two-player"), "works in local mode");
@@ -858,28 +853,25 @@ fn material_panel_reset_paths_and_engine_mode() {
     move_uci(&mut game, "e4d5");
     draw_terminal(&mut terminal, &game);
     assert!(
-        buffer_text(&terminal).contains("Material +1"),
+        buffer_text(&terminal).contains("White +1"),
         "balance before reset"
     );
     let fresh = Game::default();
     draw_terminal(&mut terminal, &fresh);
     assert!(
-        buffer_text(&terminal).contains("Material even"),
+        buffer_text(&terminal).contains("Even"),
         "default game resets display"
     );
     let mut vs = Game::new_vs_engine(shakmaty::Color::Black);
     vs.engine_status = "Stockfish thinking...".into();
     draw_terminal(&mut terminal, &vs);
     let text = buffer_text(&terminal);
-    assert!(
-        text.contains("Material even"),
-        "new vs-engine game resets display"
-    );
+    assert!(text.contains("Even"), "new vs-engine game resets display");
     assert!(text.contains("You: White vs Stockfish"), "engine mode");
     vs.switch_sides();
     draw_terminal(&mut terminal, &vs);
     assert!(
-        buffer_text(&terminal).contains("Material even"),
+        buffer_text(&terminal).contains("Even"),
         "side switch resets display"
     );
 }
@@ -923,11 +915,11 @@ fn material_panel_fits_without_overlap_both_orientations() {
         );
         // Orientation flips the board, not the material rows.
         assert!(
-            buffer_text(&terminal).contains("White  Q0 R0 B0 N0 P1"),
+            buffer_text(&terminal).contains("W: P"),
             "white row unchanged in either orientation"
         );
         assert!(
-            buffer_text(&terminal).contains("Material +1"),
+            buffer_text(&terminal).contains("White +1"),
             "balance unchanged in either orientation"
         );
     }
