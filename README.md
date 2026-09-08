@@ -32,7 +32,7 @@ app runs a local two-player game and shows a notice.
 | Escape | Cancel selection or promotion |
 | `q`, `r`, `b`, `n` during promotion | Choose queen, rook, bishop, or knight |
 | `d` | Claim a draw if eligible (also works while choosing promotion) |
-| Shift+`n` (`N`) | Open new-game configuration |
+| `n` | Open new-game configuration (during promotion, chooses a knight) |
 | Left/right in configuration | Choose White, Black, or random side |
 | Up/down in configuration | Adjust Stockfish Elo |
 | Enter / Escape in configuration | Start / cancel |

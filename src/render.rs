@@ -411,7 +411,7 @@ pub(crate) fn draw(frame: &mut Frame, game: &Game) {
     // when a draw claim is live and no other feedback is pending.
     frame.render_widget(
         Paragraph::new(
-            "Arrows/hjkl cursor  Enter move  Esc cancel  N configure  s sides  d draw  q quit | corners=cursor gold=selected green=legal amber=capture blue=last",
+            "Arrows/hjkl cursor  Enter move  Esc cancel  n configure  s sides  d draw  q quit | corners=cursor gold=selected green=legal amber=capture blue=last",
         ),
         Rect::new(1, 66, full, 1),
     );

@@ -11,7 +11,9 @@ impl Game {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             return true;
         }
-        if key.code == KeyCode::Char('N') && !self.configuring {
+        let opens_config = key.code == KeyCode::Char('N')
+            || (key.code == KeyCode::Char('n') && self.promotion.is_empty());
+        if opens_config && !self.configuring {
             self.open_new_game_config();
             return false;
         }

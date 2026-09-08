@@ -134,7 +134,7 @@ fn keyboard_selection_illegal_move_cancel_restart_and_exit() {
     key(&mut game, KeyCode::Left);
     key(&mut game, KeyCode::Up);
     assert_eq!(game.cursor, Square::A8);
-    key(&mut game, KeyCode::Char('N'));
+    key(&mut game, KeyCode::Char('n'));
     assert!(game.configuring);
     assert_eq!(game.history, ["e4"]);
     assert!(key(&mut game, KeyCode::Char('q')));
@@ -1169,7 +1169,7 @@ fn engine_turn_blocks_move_input_but_keeps_cursor_and_new_game_config() {
     game.cursor = Square::E7;
     key(&mut game, KeyCode::Char('k'));
     assert_eq!(game.cursor, Square::E8, "cursor movement stays enabled");
-    key(&mut game, KeyCode::Char('N'));
+    key(&mut game, KeyCode::Char('n'));
     assert!(game.versus_engine);
     assert!(game.configuring, "N opens configuration on engine turn");
 }
