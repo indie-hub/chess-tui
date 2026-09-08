@@ -28,25 +28,25 @@ fn start_configured_game(
     engine: &mut Option<Engine>,
     game: &mut Game,
     choice: HumanSide,
-    elo: u16,
+    skill: u16,
 ) {
     let random_white = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(true, |duration| duration.subsec_nanos() % 2 == 0);
     let human_side = resolve_human_side(choice, random_white);
     if let Some(engine) = engine.as_mut() {
-        match engine.configure_elo(elo) {
+        match engine.configure_skill(skill) {
             Ok(()) => {
                 *game = Game::new_vs_engine(!human_side);
                 game.config_side = choice;
-                game.engine_elo = elo;
+                game.engine_skill = skill;
             }
             Err(err) => {
                 *game = Game {
                     engine_status: format!("Engine unavailable: {}", err.message()),
                     engine_failed: true,
                     config_side: choice,
-                    engine_elo: elo,
+                    engine_skill: skill,
                     ..Game::default()
                 };
             }
@@ -55,7 +55,7 @@ fn start_configured_game(
         *game = Game {
             engine_status: "Engine unavailable: 2-player mode".into(),
             config_side: choice,
-            engine_elo: elo,
+            engine_skill: skill,
             ..Game::default()
         };
     }
@@ -157,8 +157,8 @@ fn main() -> io::Result<()> {
                     if game.key(key) {
                         return Ok(());
                     }
-                    if let Some((side, elo)) = game.take_new_game_request() {
-                        start_configured_game(&mut engine, &mut game, side, elo);
+                    if let Some((side, skill)) = game.take_new_game_request() {
+                        start_configured_game(&mut engine, &mut game, side, skill);
                     }
                 }
             }

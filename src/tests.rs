@@ -1,6 +1,6 @@
 use crate::drive_engine;
 use crate::engine::Engine;
-use crate::game::{Game, HumanSide, MAX_ELO, MIN_ELO, destination};
+use crate::game::{Game, HumanSide, MAX_SKILL, destination};
 use crate::render::{
     BOARD_CELLS_H, BOARD_CELLS_W, BOARD_X, BOARD_Y, MIN_HEIGHT, MIN_WIDTH, SQUARE_H, SQUARE_W,
     base_bg, draw, sprite_bytes, sprite_index,
@@ -956,6 +956,38 @@ fn file_labels_centered_under_each_column() {
 }
 
 #[test]
+fn black_side_rotates_board_coordinates_and_cursor_movement() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::White);
+    assert!(game.board_flipped());
+    assert_eq!(game.cursor, Square::E7);
+
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    for file in 0..8u16 {
+        let col = BOARD_X + file * SQUARE_W + SQUARE_W / 2;
+        let expected = char::from(b'h' - file as u8);
+        assert_eq!(
+            buffer[(col, BOARD_Y + BOARD_CELLS_H)].symbol(),
+            expected.to_string()
+        );
+    }
+    for row in 0..8u16 {
+        assert_eq!(
+            buffer[(0, BOARD_Y + row * SQUARE_H + 3)].symbol(),
+            (row + 1).to_string()
+        );
+    }
+    let (cursor_x, cursor_y) = sq(3, 6);
+    assert_eq!(buffer[(cursor_x, cursor_y)].fg, Color::Rgb(0, 220, 255));
+
+    key(&mut game, KeyCode::Up);
+    assert_eq!(game.cursor, Square::E6);
+    key(&mut game, KeyCode::Left);
+    assert_eq!(game.cursor, Square::F6);
+}
+
+#[test]
 fn promotion_chooser_supports_draw_claim() {
     let mut game = position("4k3/P7/8/8/8/8/8/4K3 w - - 100 60");
     choose(&mut game, Square::A7, Square::A8);
@@ -1177,12 +1209,14 @@ fn engine_turn_blocks_move_input_but_keeps_cursor_and_new_game_config() {
 #[test]
 fn engine_switch_sides_toggles_and_restarts() {
     let mut game = Game::new_vs_engine(shakmaty::Color::Black);
-    game.engine_elo = 2100;
+    game.engine_skill = 7;
     assert!(game.versus_engine);
     assert_eq!(game.engine_side, shakmaty::Color::Black);
     game.switch_sides();
     assert_eq!(game.engine_side, shakmaty::Color::White);
-    assert_eq!(game.engine_elo, 2100);
+    assert_eq!(game.engine_skill, 7);
+    assert!(game.board_flipped());
+    assert_eq!(game.cursor, Square::E7);
     assert_eq!(game.position, Chess::default());
 }
 
@@ -1481,7 +1515,7 @@ fn layout_at_minimum_size_and_resize_guidance() {
 }
 
 #[test]
-fn new_game_configuration_selects_side_and_bounded_elo() {
+fn new_game_configuration_selects_side_and_bounded_skill() {
     let mut game = Game::new_vs_engine(shakmaty::Color::Black);
     key(&mut game, KeyCode::Char('N'));
     assert!(game.configuring);
@@ -1494,17 +1528,14 @@ fn new_game_configuration_selects_side_and_bounded_elo() {
     for _ in 0..30 {
         key(&mut game, KeyCode::Up);
     }
-    assert_eq!(game.engine_elo, MAX_ELO);
+    assert_eq!(game.engine_skill, MAX_SKILL);
     for _ in 0..30 {
         key(&mut game, KeyCode::Down);
     }
-    assert_eq!(game.engine_elo, MIN_ELO);
+    assert_eq!(game.engine_skill, 0);
 
     key(&mut game, KeyCode::Enter);
-    assert_eq!(
-        game.take_new_game_request(),
-        Some((HumanSide::Random, MIN_ELO))
-    );
+    assert_eq!(game.take_new_game_request(), Some((HumanSide::Random, 0)));
     assert!(!game.configuring);
 }
 
@@ -1519,18 +1550,18 @@ fn new_game_configuration_renders_and_can_be_cancelled() {
         "New game",
         "Human side",
         "White",
-        "Stockfish Elo",
+        "Stockfish skill",
         "Enter: start game",
     ] {
         assert!(text.contains(expected), "missing {expected}");
     }
     assert!(!text.contains("Recent moves"));
     key(&mut game, KeyCode::Right);
-    key(&mut game, KeyCode::Up);
+    key(&mut game, KeyCode::Down);
     key(&mut game, KeyCode::Esc);
     assert!(!game.configuring);
     assert_eq!(game.config_side, HumanSide::White);
-    assert_eq!(game.engine_elo, 1500);
+    assert_eq!(game.engine_skill, MAX_SKILL);
     assert_eq!(game.take_new_game_request(), None);
 }
 
@@ -1555,11 +1586,11 @@ fn random_side_resolution_covers_both_colours() {
 }
 
 #[test]
-fn engine_accepts_elo_configuration_before_search() {
+fn engine_accepts_skill_configuration_before_search() {
     let _guard = engine_lock();
     unsafe { std::env::remove_var("FAKE_ENGINE_MODE") };
     let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
-    engine.configure_elo(2100).expect("configure Elo");
+    engine.configure_skill(7).expect("configure skill");
     engine.start_search(START_FEN).expect("search start");
     assert!(wait_bestmove(&mut engine, Duration::from_secs(2)).is_some());
 }

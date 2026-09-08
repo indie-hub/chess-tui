@@ -7,7 +7,7 @@ Wishlist items are planning notes, not implementation authorization.
 ### New-game configuration
 
 - Choose the human side: White, Black, or random.
-- Choose an approximate opponent Elo.
+- Choose Stockfish Skill Level (0-20).
 - Choose unlimited play or a timed preset.
 - Support an optional increment for timed games, such as `5+3`.
 
@@ -35,7 +35,7 @@ Wishlist items are planning notes, not implementation authorization.
 
 - Allow the human player to resign.
 - Allow a rematch with the same settings and an option to swap colors.
-- Describe the Elo setting as an approximate playing-strength target.
+- Describe Skill Level as Stockfish's native 0-20 strength control.
 
 ### Deferred
 

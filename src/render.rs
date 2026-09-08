@@ -257,13 +257,16 @@ fn square_lines(
 }
 
 fn draw_board(frame: &mut Frame, game: &Game, legal: &[Move]) {
+    let flipped = game.board_flipped();
     for row in 0..8u16 {
+        let rank = if flipped { row } else { 7 - row };
         frame.render_widget(
-            Paragraph::new((8 - row).to_string()),
+            Paragraph::new((rank + 1).to_string()),
             Rect::new(0, BOARD_Y + row * SQUARE_H + 3, 1, 1),
         );
         for file in 0..8u16 {
-            let square = Square::new(u32::from((7 - row) * 8 + file));
+            let board_file = if flipped { 7 - file } else { file };
+            let square = Square::new(u32::from(rank * 8 + board_file));
             let lines = square_lines(game, legal, square, row, file);
             frame.render_widget(
                 Paragraph::new(lines),
@@ -277,7 +280,8 @@ fn draw_board(frame: &mut Frame, game: &Game, legal: &[Move]) {
         }
     }
     for file in 0..8u16 {
-        let letter = char::from(b'a' + file as u8);
+        let board_file = if flipped { 7 - file } else { file };
+        let letter = char::from(b'a' + board_file as u8);
         frame.render_widget(
             Paragraph::new(letter.to_string()),
             Rect::new(
@@ -357,14 +361,14 @@ fn draw_new_game_config(frame: &mut Frame, game: &Game) {
             Span::raw(" >"),
         ]),
         Line::from(vec![
-            Span::raw("Stockfish Elo  "),
+            Span::raw("Stockfish skill  "),
             Span::styled(
-                game.engine_elo.to_string(),
+                game.engine_skill.to_string(),
                 Style::default().fg(Color::Rgb(255, 210, 40)),
             ),
         ]),
         Line::from(""),
-        Line::from("Left/right: side    Up/down: Elo"),
+        Line::from("Left/right: side    Up/down: skill (0-20)"),
         Line::from("Enter: start game    Esc: cancel"),
     ];
     frame.render_widget(

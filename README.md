@@ -34,7 +34,7 @@ app runs a local two-player game and shows a notice.
 | `d` | Claim a draw if eligible (also works while choosing promotion) |
 | `n` | Open new-game configuration (during promotion, chooses a knight) |
 | Left/right in configuration | Choose White, Black, or random side |
-| Up/down in configuration | Adjust Stockfish Elo |
+| Up/down in configuration | Adjust Stockfish Skill Level (0 weakest, 20 strongest) |
 | Enter / Escape in configuration | Start / cancel |
 | `s` | Toggle which colour the human plays and restart immediately |
 | `q` | Quit (outside promotion) |
@@ -58,8 +58,8 @@ interior keeps the exact sprite pixels), a cursor without a selection is marked
 with four small cyan corner brackets, empty legal destinations get a small
 centred green marker (no more than a quarter of the square, with the base
 colour visible around it), capturable destinations get a thin red-orange
-outline, and last-move squares get a subtle blue outline. White is always at
-the bottom.
+outline, and last-move squares get a subtle blue outline. The human side is
+always shown at the bottom when playing Stockfish.
 
 **Size tradeoff.** A 16x16 sprite maps to a 16-column by 8-row cell block (one
 pixel per cell width, two pixel rows per half-block cell), so the 8x8 board

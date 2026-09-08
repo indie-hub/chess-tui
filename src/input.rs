@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use shakmaty::Role;
 
-use crate::game::{ELO_STEP, Game, MAX_ELO, MIN_ELO};
+use crate::game::{Game, MAX_SKILL, SKILL_STEP};
 
 impl Game {
     pub(crate) fn key(&mut self, key: KeyEvent) -> bool {
@@ -29,10 +29,10 @@ impl Game {
                     self.config_side = self.config_side.next();
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    self.engine_elo = self.engine_elo.saturating_add(ELO_STEP).min(MAX_ELO);
+                    self.engine_skill = self.engine_skill.saturating_add(SKILL_STEP).min(MAX_SKILL);
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    self.engine_elo = self.engine_elo.saturating_sub(ELO_STEP).max(MIN_ELO);
+                    self.engine_skill = self.engine_skill.saturating_sub(SKILL_STEP);
                 }
                 _ => {}
             }
@@ -77,15 +77,16 @@ impl Game {
         } else {
             let (mut file, mut rank) =
                 (i32::from(self.cursor.file()), i32::from(self.cursor.rank()));
+            let direction = if self.board_flipped() { -1 } else { 1 };
             match key.code {
                 KeyCode::Char('q') => return true,
                 KeyCode::Char('s') if self.versus_engine => self.switch_sides(),
                 KeyCode::Char('d') => self.claim_draw(),
                 KeyCode::Enter => self.select(),
-                KeyCode::Left | KeyCode::Char('h') => file -= 1,
-                KeyCode::Right | KeyCode::Char('l') => file += 1,
-                KeyCode::Up | KeyCode::Char('k') => rank += 1,
-                KeyCode::Down | KeyCode::Char('j') => rank -= 1,
+                KeyCode::Left | KeyCode::Char('h') => file -= direction,
+                KeyCode::Right | KeyCode::Char('l') => file += direction,
+                KeyCode::Up | KeyCode::Char('k') => rank += direction,
+                KeyCode::Down | KeyCode::Char('j') => rank -= direction,
                 _ => {}
             }
             if matches!(

@@ -1,8 +1,7 @@
 use shakmaty::{Chess, Color, EnPassantMode, Move, Position, Square, fen::Fen, san::SanPlus};
 
-pub(crate) const MIN_ELO: u16 = 1320;
-pub(crate) const MAX_ELO: u16 = 3190;
-pub(crate) const ELO_STEP: u16 = 100;
+pub(crate) const MAX_SKILL: u16 = 20;
+pub(crate) const SKILL_STEP: u16 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum HumanSide {
@@ -53,7 +52,7 @@ pub(crate) struct Game {
     pub(crate) engine_failed: bool,
     pub(crate) configuring: bool,
     pub(crate) config_side: HumanSide,
-    pub(crate) engine_elo: u16,
+    pub(crate) engine_skill: u16,
     pub(crate) new_game_requested: bool,
     pub(crate) config_snapshot: Option<(HumanSide, u16)>,
     pub(crate) captured_by_white: Vec<shakmaty::Role>,
@@ -79,7 +78,7 @@ impl Default for Game {
             engine_failed: false,
             configuring: false,
             config_side: HumanSide::White,
-            engine_elo: 1500,
+            engine_skill: MAX_SKILL,
             new_game_requested: false,
             config_snapshot: None,
             captured_by_white: Vec::new(),
@@ -220,6 +219,11 @@ impl Game {
         Self {
             versus_engine: true,
             engine_side,
+            cursor: if engine_side == Color::White {
+                Square::E7
+            } else {
+                Square::E2
+            },
             config_side: match engine_side.other() {
                 Color::White => HumanSide::White,
                 Color::Black => HumanSide::Black,
@@ -229,15 +233,15 @@ impl Game {
     }
 
     pub(crate) fn open_new_game_config(&mut self) {
-        self.config_snapshot = Some((self.config_side, self.engine_elo));
+        self.config_snapshot = Some((self.config_side, self.engine_skill));
         self.configuring = true;
         self.new_game_requested = false;
     }
 
     pub(crate) fn cancel_new_game_config(&mut self) {
-        if let Some((side, elo)) = self.config_snapshot.take() {
+        if let Some((side, skill)) = self.config_snapshot.take() {
             self.config_side = side;
-            self.engine_elo = elo;
+            self.engine_skill = skill;
         }
         self.configuring = false;
     }
@@ -251,7 +255,7 @@ impl Game {
     pub(crate) fn take_new_game_request(&mut self) -> Option<(HumanSide, u16)> {
         self.new_game_requested.then(|| {
             self.new_game_requested = false;
-            (self.config_side, self.engine_elo)
+            (self.config_side, self.engine_skill)
         })
     }
 
@@ -259,10 +263,14 @@ impl Game {
         self.versus_engine && !self.configuring && self.position.turn() == self.engine_side
     }
 
+    pub(crate) fn board_flipped(&self) -> bool {
+        self.versus_engine && self.engine_side == Color::White
+    }
+
     pub(crate) fn switch_sides(&mut self) {
-        let elo = self.engine_elo;
+        let skill = self.engine_skill;
         *self = Self::new_vs_engine(!self.engine_side);
-        self.engine_elo = elo;
+        self.engine_skill = skill;
     }
 
     pub(crate) fn to_fen(&self) -> String {
