@@ -102,7 +102,6 @@ pub(crate) fn destination(m: Move) -> Square {
     }
 }
 
-#[allow(dead_code)]
 fn role_value(role: shakmaty::Role) -> i32 {
     match role {
         shakmaty::Role::Pawn => 1,
@@ -279,7 +278,6 @@ impl Game {
 
     /// Roles captured by `side` (pieces that `side` has taken).
     /// Returned slice is in capture order. Empty if `side` has not captured.
-    #[allow(dead_code)]
     pub(crate) fn captured_by(&self, side: Color) -> &[shakmaty::Role] {
         match side {
             Color::White => &self.captured_by_white,
@@ -290,7 +288,6 @@ impl Game {
     /// Conventional material balance: sum of captured values for White minus
     /// sum for Black (pawn 1, knight/bishop 3, rook 5, queen 9, king 0).
     /// Positive means White has captured more material than Black (White advantage).
-    #[allow(dead_code)]
     pub(crate) fn material_balance(&self) -> i32 {
         let white: i32 = self.captured_by_white.iter().map(|r| role_value(*r)).sum();
         let black: i32 = self.captured_by_black.iter().map(|r| role_value(*r)).sum();

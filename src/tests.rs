@@ -2,8 +2,8 @@ use crate::drive_engine;
 use crate::engine::Engine;
 use crate::game::{Game, HumanSide, MAX_SKILL, destination};
 use crate::render::{
-    BOARD_CELLS_H, BOARD_CELLS_W, BOARD_X, BOARD_Y, MIN_HEIGHT, MIN_WIDTH, SQUARE_H, SQUARE_W,
-    base_bg, draw, sprite_bytes, sprite_index,
+    BOARD_CELLS_H, BOARD_CELLS_W, BOARD_X, BOARD_Y, MATERIAL_H, MATERIAL_Y, MIN_HEIGHT, MIN_WIDTH,
+    PANEL_X, SQUARE_H, SQUARE_W, base_bg, draw, sprite_bytes, sprite_index,
 };
 use crate::sprites::{SPRITE_SIZE, sprite_pixels};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -774,6 +774,105 @@ fn long_engine_status_wraps_in_panel() {
         "Recent moves",
     ] {
         assert!(text.contains(expected), "missing {expected}");
+    }
+}
+
+#[test]
+fn material_panel_shows_captures_and_white_balance() {
+    let mut game = position("4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1");
+    move_uci(&mut game, "e4d5");
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    assert!(text.contains("Captured"), "material block title");
+    assert!(
+        text.contains("White +1"),
+        "signed balance for white capture"
+    );
+    assert!(
+        text.contains("♟"),
+        "white-captured black pawn figurine shown"
+    );
+    assert!(!text.contains("♙"), "no white pawn in white capture row");
+}
+
+#[test]
+fn material_panel_black_advantage_and_local_mode() {
+    let mut game = position("r3k3/8/8/8/8/8/P7/4K3 b - - 0 1");
+    move_uci(&mut game, "a8a2");
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    assert!(
+        text.contains("Black +1"),
+        "signed balance for black capture"
+    );
+    assert!(
+        text.contains("♙"),
+        "black-captured white pawn figurine shown"
+    );
+    assert!(text.contains("Local two-player"), "works in local mode");
+}
+
+#[test]
+fn material_panel_equal_state_and_reset_paths() {
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    let mut game = position("4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1");
+    move_uci(&mut game, "e4d5");
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    assert!(text.contains("White +1"), "balance before reset");
+    let fresh = Game::default();
+    draw_terminal(&mut terminal, &fresh);
+    assert!(
+        buffer_text(&terminal).contains("Equal"),
+        "equal state shown unambiguously"
+    );
+    let mut vs = Game::new_vs_engine(shakmaty::Color::Black);
+    vs.engine_status = "Stockfish thinking...".into();
+    draw_terminal(&mut terminal, &vs);
+    let text = buffer_text(&terminal);
+    assert!(text.contains("Equal"), "reset engine game is equal");
+    assert!(text.contains("You: White vs Stockfish"), "engine mode");
+}
+
+#[test]
+fn material_panel_fits_without_overlap_both_orientations() {
+    let mut game = position("4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1");
+    move_uci(&mut game, "e4d5");
+    for engine_side in [shakmaty::Color::Black, shakmaty::Color::White] {
+        game.versus_engine = true;
+        game.engine_side = engine_side;
+        let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+        draw_terminal(&mut terminal, &game);
+        let buffer = terminal.backend().buffer();
+        let area = buffer.area;
+        assert!(
+            area.width >= MIN_WIDTH && area.height >= MIN_HEIGHT,
+            "buffer at least minimum size"
+        );
+        // The material block must not collide with the recent-moves block
+        // (rows 5..=17) or the footer (rows 66..=67).
+        assert_eq!(
+            buffer[(PANEL_X, MATERIAL_Y)].symbol(),
+            "┌",
+            "material top border in either orientation"
+        );
+        assert_eq!(
+            buffer[(PANEL_X, MATERIAL_Y + MATERIAL_H - 1)].symbol(),
+            "└",
+            "material bottom border in either orientation"
+        );
+        assert_eq!(
+            buffer[(PANEL_X, 4)].symbol(),
+            " ",
+            "row above material is blank, no overlap with recent moves"
+        );
+        assert_eq!(
+            buffer[(PANEL_X, 65)].symbol(),
+            " ",
+            "row below material is blank, no overlap with footer"
+        );
     }
 }
 

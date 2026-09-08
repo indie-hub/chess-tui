@@ -5,9 +5,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
-#[cfg(test)]
-use shakmaty::{Color as Side, Role};
-use shakmaty::{Move, Position, Square};
+use shakmaty::{Color as Side, Move, Position, Role, Square};
 
 use crate::game::{Game, destination};
 use crate::sprites::{SPRITE_SIZE, sprite_pixels};
@@ -26,6 +24,11 @@ pub(crate) const BOARD_X: u16 = 2;
 pub(crate) const BOARD_Y: u16 = 1;
 pub(crate) const PANEL_X: u16 = 134;
 pub(crate) const PANEL_WIDTH: u16 = 34;
+// The material block sits below the engine-status area, which occupies rows
+// 19-22 only when a status is present; the block never overlaps it, the
+// "Recent moves" block (rows 5-17) or the two-line footer (rows 66-67).
+pub(crate) const MATERIAL_Y: u16 = 24;
+pub(crate) const MATERIAL_H: u16 = 5;
 
 // Square decorations. All are high-contrast against the mid-tone square
 // colours, the marker colour and the piece artwork.
@@ -166,6 +169,82 @@ fn capitalize(word: &str) -> String {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => String::new(),
     }
+}
+
+// Compact one-cell figurine for a captured piece. A piece White captured was a
+// black piece, so its glyph is the filled black figurine; the reverse holds for
+// Black's captures.
+fn role_glyph(color: Side, role: Role) -> char {
+    match (color, role) {
+        (Side::White, Role::King) => '♔',
+        (Side::White, Role::Queen) => '♕',
+        (Side::White, Role::Rook) => '♖',
+        (Side::White, Role::Bishop) => '♗',
+        (Side::White, Role::Knight) => '♘',
+        (Side::White, Role::Pawn) => '♙',
+        (Side::Black, Role::King) => '♚',
+        (Side::Black, Role::Queen) => '♛',
+        (Side::Black, Role::Rook) => '♜',
+        (Side::Black, Role::Bishop) => '♝',
+        (Side::Black, Role::Knight) => '♞',
+        (Side::Black, Role::Pawn) => '♟',
+    }
+}
+
+// One figurine span per captured piece, coloured so the filled black glyphs and
+// the outline white glyphs both stay readable on a dark terminal background.
+fn captured_spans(roles: &[Role], piece_color: Side) -> Vec<Span<'static>> {
+    let fg = match piece_color {
+        Side::White => [255, 255, 255],
+        Side::Black => [150, 150, 150],
+    };
+    roles
+        .iter()
+        .map(|&role| {
+            Span::styled(
+                role_glyph(piece_color, role).to_string(),
+                Style::default().fg(to_rgb(fg)),
+            )
+        })
+        .collect()
+}
+
+fn draw_material(frame: &mut Frame, game: &Game) {
+    let mut white = vec![Span::styled(
+        "White",
+        Style::default().fg(to_rgb([255, 255, 255])),
+    )];
+    white.push(Span::raw(" "));
+    white.extend(captured_spans(game.captured_by(Side::White), Side::Black));
+    let mut black = vec![Span::styled(
+        "Black",
+        Style::default().fg(to_rgb([150, 150, 150])),
+    )];
+    black.push(Span::raw(" "));
+    black.extend(captured_spans(game.captured_by(Side::Black), Side::White));
+    let balance = game.material_balance();
+    let balance_span = if balance > 0 {
+        Span::styled(
+            format!("White +{balance}"),
+            Style::default().fg(to_rgb([255, 210, 40])),
+        )
+    } else if balance < 0 {
+        Span::styled(
+            format!("Black +{}", -balance),
+            Style::default().fg(to_rgb([0, 220, 255])),
+        )
+    } else {
+        Span::styled("Equal", Style::default().fg(to_rgb([150, 150, 150])))
+    };
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(white),
+            Line::from(black),
+            Line::from(balance_span),
+        ])
+        .block(Block::default().title(" Captured ").borders(Borders::ALL)),
+        Rect::new(PANEL_X, MATERIAL_Y, PANEL_WIDTH, MATERIAL_H),
+    );
 }
 
 fn marker_span(color: [u8; 3]) -> Span<'static> {
@@ -410,6 +489,7 @@ pub(crate) fn draw(frame: &mut Frame, game: &Game) {
     };
     draw_board(frame, game, &legal);
     draw_panel(frame, game);
+    draw_material(frame, game);
     // Footer is at most two lines: one compact controls+legend line and a
     // dynamic line. The dynamic line shows the draw-availability hint only
     // when a draw claim is live and no other feedback is pending.
