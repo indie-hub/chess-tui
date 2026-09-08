@@ -135,3 +135,31 @@ and the game/input/render module split.
 Dependency documentation: [Ratatui](https://docs.rs/ratatui/0.30/ratatui/),
 [Crossterm](https://docs.rs/crossterm/0.29/crossterm/), and
 [Shakmaty](https://docs.rs/shakmaty/0.30/shakmaty/).
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0 or
+later** (GPL-3.0-or-later); see [`LICENSE`](LICENSE). Source files carry an
+`SPDX-License-Identifier: GPL-3.0-or-later` header.
+
+It depends on two other GPL-3.0 works, whose own license text is vendored
+verbatim rather than only linked:
+
+- **[Shakmaty](https://github.com/niklasf/shakmaty)** (GPL-3.0-or-later) —
+  the move-generation and rules library this project links against for
+  legal moves, castling, en passant, promotions, and game-end detection.
+  License text: [`third_party/shakmaty/COPYING`](third_party/shakmaty/COPYING).
+- **[Stockfish](https://stockfishchess.org/)** (GPL-3.0-only) — the chess
+  engine run as a separate subprocess; see [Stockfish](#stockfish) above.
+  License text: [`third_party/stockfish/Copying.txt`](third_party/stockfish/Copying.txt).
+
+Because this project links `shakmaty`, a GPL-3.0-or-later library, the
+resulting binary is a combined work and is licensed GPL-3.0-or-later as a
+whole.
+
+The board sprites are the **[Pixel Chess Pieces](https://spicygame.itch.io/chess-pieces)**
+pack by [SpicyGame](https://spicygame.itch.io/), released under
+[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/). CC0
+places no obligation on us, but we're glad to credit SpicyGame's work here
+and in [`assets/PROVENANCE.md`](assets/PROVENANCE.md) all the same — thank
+you for making it freely available.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
 // Test-only deterministic UCI engine used by the engine integration tests.
 // It is driven through the same subprocess protocol as a real engine. The
 // FAKE_ENGINE_MODE environment variable selects the scripted behaviour:

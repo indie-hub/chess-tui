@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use crate::drive_engine;
 use crate::engine::Engine;
 use crate::game::{Game, HumanSide, MAX_SKILL, destination};

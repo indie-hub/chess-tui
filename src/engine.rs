@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
 // Stdlib-managed UCI engine subprocess. A dedicated thread reads the engine's
 // stdout into an mpsc channel so the UI can poll non-blocking for the
 // bestmove while the engine thinks. The engine is located from the

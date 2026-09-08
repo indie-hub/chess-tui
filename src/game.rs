@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use shakmaty::{Chess, Color, EnPassantMode, Move, Position, Square, fen::Fen, san::SanPlus};
 
 pub(crate) const MAX_SKILL: u16 = 20;
