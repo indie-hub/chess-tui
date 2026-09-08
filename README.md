@@ -5,6 +5,14 @@ Shakmaty, played as the human side against Stockfish. By default the human is
 White and the engine Black; when no engine is available it falls back to a
 local two-player game.
 
+## Screenshot
+
+![Chess TUI showing the painted board, move history, and material panel](docs/images/chess-tui-material-panel.png)
+
+The side panel keeps recent moves and captured material visible: `W:` and
+`B:` list the pieces captured by each colour, followed by the current material
+advantage.
+
 ## Run
 
 Install a current stable Rust toolchain, then run from this directory:
