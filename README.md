@@ -68,7 +68,7 @@ renders identically in every terminal, including WarpTerminal. The white army
 uses the pack's white sprites and the black army its black sprites. The
 selected square is framed by a high-contrast gold box-drawing outline (its
 interior keeps the exact sprite pixels), a cursor without a selection is marked
-with four small cyan corner brackets, empty legal destinations get a small
+with bright cyan three-cell corner brackets, empty legal destinations get a small
 centred green marker (no more than a quarter of the square, with the base
 colour visible around it), capturable destinations get a thin red-orange
 outline, and last-move squares get a subtle blue outline. The human side is

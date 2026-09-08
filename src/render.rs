@@ -35,7 +35,7 @@ pub(crate) const MATERIAL_H: u16 = 6;
 // Square decorations. All are high-contrast against the mid-tone square
 // colours, the marker colour and the piece artwork.
 const SELECTED_OUTLINE: [u8; 3] = [255, 210, 40];
-const CURSOR_OUTLINE: [u8; 3] = [0, 220, 255];
+const CURSOR_OUTLINE: [u8; 3] = [80, 255, 255];
 const CAPTURE_OUTLINE: [u8; 3] = [230, 80, 20];
 const LEGAL_MARKER: [u8; 3] = [60, 200, 60];
 const LAST_MOVE_OUTLINE: [u8; 3] = [90, 130, 205];
@@ -296,8 +296,10 @@ fn square_lines(
                 .map(|cx| {
                     let on_perimeter =
                         cx == 0 || cx == SQUARE_W - 1 || cy == 0 || cy == SQUARE_H - 1;
-                    let on_corner =
-                        (cx == 0 || cx == SQUARE_W - 1) && (cy == 0 || cy == SQUARE_H - 1);
+                    let on_cursor_bracket = on_perimeter
+                        && (((cy == 0 || cy == SQUARE_H - 1) && (cx <= 2 || cx >= SQUARE_W - 3))
+                            || ((cx == 0 || cx == SQUARE_W - 1)
+                                && (cy <= 2 || cy >= SQUARE_H - 3)));
                     let in_marker = (MARKER_CX0..=MARKER_CX1).contains(&cx)
                         && (MARKER_CY0..=MARKER_CY1).contains(&cy);
                     let span = if decor == Decor::Selected && on_perimeter {
@@ -317,7 +319,7 @@ fn square_lines(
                             None => cell_span(bg, bg),
                         }
                     };
-                    if cursor && on_corner {
+                    if cursor && on_cursor_bracket {
                         outline_span(cx, cy, CURSOR_OUTLINE, bg)
                     } else {
                         span

@@ -565,9 +565,13 @@ fn cursor_shows_corner_brackets() {
     draw_terminal(&mut terminal, &game);
     let buffer = terminal.backend().buffer();
     let (x, y) = sq(4, 6);
-    let white = Color::Rgb(0, 220, 255);
+    let cyan = Color::Rgb(80, 255, 255);
     assert_eq!(buffer[(x, y)].symbol(), "┌");
-    assert_eq!(buffer[(x, y)].fg, white);
+    assert_eq!(buffer[(x, y)].fg, cyan);
+    assert_eq!(buffer[(x + 1, y)].fg, cyan);
+    assert_eq!(buffer[(x + 2, y)].fg, cyan);
+    assert_eq!(buffer[(x, y + 1)].fg, cyan);
+    assert_eq!(buffer[(x, y + 2)].fg, cyan);
     assert_eq!(buffer[(x + SQUARE_W - 1, y)].symbol(), "┐");
     assert_eq!(buffer[(x, y + SQUARE_H - 1)].symbol(), "└");
     assert_eq!(buffer[(x + SQUARE_W - 1, y + SQUARE_H - 1)].symbol(), "┘");
@@ -638,7 +642,7 @@ fn cursor_on_legal_destination_shows_white_corners_and_marker() {
     let buffer = terminal.backend().buffer();
     let (x, y) = sq(4, 4);
     assert_eq!(buffer[(x, y)].symbol(), "┌");
-    assert_eq!(buffer[(x, y)].fg, Color::Rgb(0, 220, 255));
+    assert_eq!(buffer[(x, y)].fg, Color::Rgb(80, 255, 255));
     assert_eq!(buffer[(x + 7, y + 3)].bg, Color::Rgb(60, 200, 60));
 }
 
@@ -655,7 +659,7 @@ fn cursor_on_capture_shows_white_corners_and_amber_outline() {
     assert_eq!(buffer[(x, y)].symbol(), "┌");
     assert_eq!(
         buffer[(x, y)].fg,
-        Color::Rgb(0, 220, 255),
+        Color::Rgb(80, 255, 255),
         "cursor corner visible"
     );
     assert_eq!(
@@ -677,7 +681,7 @@ fn cursor_on_last_move_shows_white_corners_and_blue_outline() {
     assert_eq!(buffer[(x, y)].symbol(), "┌");
     assert_eq!(
         buffer[(x, y)].fg,
-        Color::Rgb(0, 220, 255),
+        Color::Rgb(80, 255, 255),
         "cursor corner visible"
     );
     assert_eq!(
@@ -962,7 +966,7 @@ fn cursor_corners_visible_on_light_and_dark_squares() {
     let (x, y) = sq(0, 7);
     assert_eq!(
         buffer[(x, y)].fg,
-        Color::Rgb(0, 220, 255),
+        Color::Rgb(80, 255, 255),
         "cursor corner on dark square"
     );
     game.cursor = Square::A8; // light square
@@ -971,7 +975,7 @@ fn cursor_corners_visible_on_light_and_dark_squares() {
     let (x2, y2) = sq(0, 0);
     assert_eq!(
         buffer[(x2, y2)].fg,
-        Color::Rgb(0, 220, 255),
+        Color::Rgb(80, 255, 255),
         "cursor corner on light square"
     );
 }
@@ -1130,7 +1134,7 @@ fn black_side_rotates_board_coordinates_and_cursor_movement() {
         );
     }
     let (cursor_x, cursor_y) = sq(3, 6);
-    assert_eq!(buffer[(cursor_x, cursor_y)].fg, Color::Rgb(0, 220, 255));
+    assert_eq!(buffer[(cursor_x, cursor_y)].fg, Color::Rgb(80, 255, 255));
 
     key(&mut game, KeyCode::Up);
     assert_eq!(game.cursor, Square::E6);
