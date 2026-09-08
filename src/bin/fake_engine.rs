@@ -37,30 +37,25 @@ fn main() {
             current_fen = fen.to_string();
         }
         match line.as_str() {
-            "uci" => {
-                if mode != "no-uci" {
-                    if mode == "delayed" {
-                        std::thread::sleep(std::time::Duration::from_millis(300));
-                    }
-                    let _ = writeln!(out, "id name fake_engine\nid author room-4\nuciok");
-                    let _ = out.flush();
+            "uci" if mode != "no-uci" => {
+                if mode == "delayed" {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
                 }
+                let _ = writeln!(out, "id name fake_engine\nid author room-4\nuciok");
+                let _ = out.flush();
             }
-            "isready" => {
-                if mode != "no-ready" {
-                    if mode == "delayed" {
-                        std::thread::sleep(std::time::Duration::from_millis(300));
-                    }
-                    let _ = writeln!(out, "readyok");
-                    let _ = out.flush();
+            "uci" => {}
+            "isready" if mode != "no-ready" => {
+                if mode == "delayed" {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
                 }
+                let _ = writeln!(out, "readyok");
+                let _ = out.flush();
             }
+            "isready" => {}
             "ucinewgame" => {}
-            "quit" => {
-                if mode != "ignore-quit" {
-                    std::process::exit(0);
-                }
-            }
+            "quit" if mode != "ignore-quit" => std::process::exit(0),
+            "quit" => {}
             _ if line.starts_with("position") || line.starts_with("go") => match mode.as_str() {
                 "timeout" => {}
                 "illegal" => {

@@ -7,13 +7,59 @@ mod sprites;
 mod tests;
 
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use engine::Engine;
-use game::Game;
+use game::{Game, HumanSide};
 use render::{MIN_HEIGHT, MIN_WIDTH, draw};
 use shakmaty::{Color as Side, uci::UciMove};
+
+fn resolve_human_side(choice: HumanSide, random_white: bool) -> Side {
+    match choice {
+        HumanSide::White => Side::White,
+        HumanSide::Black => Side::Black,
+        HumanSide::Random if random_white => Side::White,
+        HumanSide::Random => Side::Black,
+    }
+}
+
+fn start_configured_game(
+    engine: &mut Option<Engine>,
+    game: &mut Game,
+    choice: HumanSide,
+    elo: u16,
+) {
+    let random_white = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(true, |duration| duration.subsec_nanos() % 2 == 0);
+    let human_side = resolve_human_side(choice, random_white);
+    if let Some(engine) = engine.as_mut() {
+        match engine.configure_elo(elo) {
+            Ok(()) => {
+                *game = Game::new_vs_engine(!human_side);
+                game.config_side = choice;
+                game.engine_elo = elo;
+            }
+            Err(err) => {
+                *game = Game {
+                    engine_status: format!("Engine unavailable: {}", err.message()),
+                    engine_failed: true,
+                    config_side: choice,
+                    engine_elo: elo,
+                    ..Game::default()
+                };
+            }
+        }
+    } else {
+        *game = Game {
+            engine_status: "Engine unavailable: 2-player mode".into(),
+            config_side: choice,
+            engine_elo: elo,
+            ..Game::default()
+        };
+    }
+}
 
 // Drive the engine while it is the engine's turn: start the search when the
 // turn begins, then poll for the bestmove without blocking. Every engine move
@@ -107,8 +153,13 @@ fn main() -> io::Result<()> {
                 if small && press && quit_key {
                     return Ok(());
                 }
-                if !small && game.key(key) {
-                    return Ok(());
+                if !small {
+                    if game.key(key) {
+                        return Ok(());
+                    }
+                    if let Some((side, elo)) = game.take_new_game_request() {
+                        start_configured_game(&mut engine, &mut game, side, elo);
+                    }
                 }
             }
         }

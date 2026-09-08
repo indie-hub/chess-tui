@@ -336,6 +336,45 @@ fn draw_panel(frame: &mut Frame, game: &Game) {
     }
 }
 
+fn draw_new_game_config(frame: &mut Frame, game: &Game) {
+    let area = frame.area();
+    let width = 72;
+    let height = 12;
+    let popup = Rect::new(
+        area.width.saturating_sub(width) / 2,
+        area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    );
+    let text = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("Human side   < "),
+            Span::styled(
+                game.config_side.label(),
+                Style::default().fg(Color::Rgb(0, 220, 255)),
+            ),
+            Span::raw(" >"),
+        ]),
+        Line::from(vec![
+            Span::raw("Stockfish Elo  "),
+            Span::styled(
+                game.engine_elo.to_string(),
+                Style::default().fg(Color::Rgb(255, 210, 40)),
+            ),
+        ]),
+        Line::from(""),
+        Line::from("Left/right: side    Up/down: Elo"),
+        Line::from("Enter: start game    Esc: cancel"),
+    ];
+    frame.render_widget(
+        Paragraph::new(text)
+            .alignment(ratatui::layout::Alignment::Center)
+            .block(Block::default().title(" New game ").borders(Borders::ALL)),
+        popup,
+    );
+}
+
 pub(crate) fn draw(frame: &mut Frame, game: &Game) {
     let area = frame.area();
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
@@ -346,6 +385,10 @@ pub(crate) fn draw(frame: &mut Frame, game: &Game) {
             )),
             area,
         );
+        return;
+    }
+    if game.configuring {
+        draw_new_game_config(frame, game);
         return;
     }
     let full = area.width.saturating_sub(2);
@@ -368,7 +411,7 @@ pub(crate) fn draw(frame: &mut Frame, game: &Game) {
     // when a draw claim is live and no other feedback is pending.
     frame.render_widget(
         Paragraph::new(
-            "Arrows/hjkl cursor  Enter move  Esc cancel  N new  s sides  d draw  q quit | corners=cursor gold=selected green=legal amber=capture blue=last",
+            "Arrows/hjkl cursor  Enter move  Esc cancel  N configure  s sides  d draw  q quit | corners=cursor gold=selected green=legal amber=capture blue=last",
         ),
         Rect::new(1, 66, full, 1),
     );

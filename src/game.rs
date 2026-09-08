@@ -1,5 +1,42 @@
 use shakmaty::{Chess, Color, EnPassantMode, Move, Position, Square, fen::Fen, san::SanPlus};
 
+pub(crate) const MIN_ELO: u16 = 1320;
+pub(crate) const MAX_ELO: u16 = 3190;
+pub(crate) const ELO_STEP: u16 = 100;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum HumanSide {
+    White,
+    Black,
+    Random,
+}
+
+impl HumanSide {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::White => "White",
+            Self::Black => "Black",
+            Self::Random => "Random",
+        }
+    }
+
+    pub(crate) fn previous(self) -> Self {
+        match self {
+            Self::White => Self::Random,
+            Self::Black => Self::White,
+            Self::Random => Self::Black,
+        }
+    }
+
+    pub(crate) fn next(self) -> Self {
+        match self {
+            Self::White => Self::Black,
+            Self::Black => Self::Random,
+            Self::Random => Self::White,
+        }
+    }
+}
+
 pub(crate) struct Game {
     pub(crate) position: Chess,
     pub(crate) positions: Vec<Chess>,
@@ -14,6 +51,11 @@ pub(crate) struct Game {
     pub(crate) engine_side: Color,
     pub(crate) engine_status: String,
     pub(crate) engine_failed: bool,
+    pub(crate) configuring: bool,
+    pub(crate) config_side: HumanSide,
+    pub(crate) engine_elo: u16,
+    pub(crate) new_game_requested: bool,
+    pub(crate) config_snapshot: Option<(HumanSide, u16)>,
     pub(crate) captured_by_white: Vec<shakmaty::Role>,
     pub(crate) captured_by_black: Vec<shakmaty::Role>,
 }
@@ -35,6 +77,11 @@ impl Default for Game {
             engine_side: Color::Black,
             engine_status: String::new(),
             engine_failed: false,
+            configuring: false,
+            config_side: HumanSide::White,
+            engine_elo: 1500,
+            new_game_requested: false,
+            config_snapshot: None,
             captured_by_white: Vec::new(),
             captured_by_black: Vec::new(),
         }
@@ -173,16 +220,49 @@ impl Game {
         Self {
             versus_engine: true,
             engine_side,
+            config_side: match engine_side.other() {
+                Color::White => HumanSide::White,
+                Color::Black => HumanSide::Black,
+            },
             ..Self::default()
         }
     }
 
+    pub(crate) fn open_new_game_config(&mut self) {
+        self.config_snapshot = Some((self.config_side, self.engine_elo));
+        self.configuring = true;
+        self.new_game_requested = false;
+    }
+
+    pub(crate) fn cancel_new_game_config(&mut self) {
+        if let Some((side, elo)) = self.config_snapshot.take() {
+            self.config_side = side;
+            self.engine_elo = elo;
+        }
+        self.configuring = false;
+    }
+
+    pub(crate) fn request_configured_game(&mut self) {
+        self.config_snapshot = None;
+        self.configuring = false;
+        self.new_game_requested = true;
+    }
+
+    pub(crate) fn take_new_game_request(&mut self) -> Option<(HumanSide, u16)> {
+        self.new_game_requested.then(|| {
+            self.new_game_requested = false;
+            (self.config_side, self.engine_elo)
+        })
+    }
+
     pub(crate) fn engine_to_move(&self) -> bool {
-        self.versus_engine && self.position.turn() == self.engine_side
+        self.versus_engine && !self.configuring && self.position.turn() == self.engine_side
     }
 
     pub(crate) fn switch_sides(&mut self) {
+        let elo = self.engine_elo;
         *self = Self::new_vs_engine(!self.engine_side);
+        self.engine_elo = elo;
     }
 
     pub(crate) fn to_fen(&self) -> String {

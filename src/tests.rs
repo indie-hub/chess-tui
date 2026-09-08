@@ -1,6 +1,6 @@
 use crate::drive_engine;
 use crate::engine::Engine;
-use crate::game::{Game, destination};
+use crate::game::{Game, HumanSide, MAX_ELO, MIN_ELO, destination};
 use crate::render::{
     BOARD_CELLS_H, BOARD_CELLS_W, BOARD_X, BOARD_Y, MIN_HEIGHT, MIN_WIDTH, SQUARE_H, SQUARE_W,
     base_bg, draw, sprite_bytes, sprite_index,
@@ -135,8 +135,8 @@ fn keyboard_selection_illegal_move_cancel_restart_and_exit() {
     key(&mut game, KeyCode::Up);
     assert_eq!(game.cursor, Square::A8);
     key(&mut game, KeyCode::Char('N'));
-    assert_eq!(game.position, Chess::default());
-    assert!(game.history.is_empty());
+    assert!(game.configuring);
+    assert_eq!(game.history, ["e4"]);
     assert!(key(&mut game, KeyCode::Char('q')));
     assert!(game.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
     let mut release = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
@@ -1159,7 +1159,7 @@ fn engine_real_lookup_finds_staged_source_tree_binary() {
 }
 
 #[test]
-fn engine_turn_blocks_move_input_but_keeps_cursor_and_restart() {
+fn engine_turn_blocks_move_input_but_keeps_cursor_and_new_game_config() {
     let mut game = position("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1");
     game.versus_engine = true;
     game.engine_side = shakmaty::Color::Black;
@@ -1171,16 +1171,18 @@ fn engine_turn_blocks_move_input_but_keeps_cursor_and_restart() {
     assert_eq!(game.cursor, Square::E8, "cursor movement stays enabled");
     key(&mut game, KeyCode::Char('N'));
     assert!(game.versus_engine);
-    assert_eq!(game.position, Chess::default(), "restart resets the board");
+    assert!(game.configuring, "N opens configuration on engine turn");
 }
 
 #[test]
 fn engine_switch_sides_toggles_and_restarts() {
     let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    game.engine_elo = 2100;
     assert!(game.versus_engine);
     assert_eq!(game.engine_side, shakmaty::Color::Black);
     game.switch_sides();
     assert_eq!(game.engine_side, shakmaty::Color::White);
+    assert_eq!(game.engine_elo, 2100);
     assert_eq!(game.position, Chess::default());
 }
 
@@ -1476,4 +1478,88 @@ fn layout_at_minimum_size_and_resize_guidance() {
     let text = buffer_text(&terminal);
     assert!(text.contains(&format!("Resize to at least {MIN_WIDTH}x{MIN_HEIGHT}")));
     assert!(text.contains("60x20"));
+}
+
+#[test]
+fn new_game_configuration_selects_side_and_bounded_elo() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    key(&mut game, KeyCode::Char('N'));
+    assert!(game.configuring);
+
+    key(&mut game, KeyCode::Right);
+    assert_eq!(game.config_side, HumanSide::Black);
+    key(&mut game, KeyCode::Right);
+    assert_eq!(game.config_side, HumanSide::Random);
+
+    for _ in 0..30 {
+        key(&mut game, KeyCode::Up);
+    }
+    assert_eq!(game.engine_elo, MAX_ELO);
+    for _ in 0..30 {
+        key(&mut game, KeyCode::Down);
+    }
+    assert_eq!(game.engine_elo, MIN_ELO);
+
+    key(&mut game, KeyCode::Enter);
+    assert_eq!(
+        game.take_new_game_request(),
+        Some((HumanSide::Random, MIN_ELO))
+    );
+    assert!(!game.configuring);
+}
+
+#[test]
+fn new_game_configuration_renders_and_can_be_cancelled() {
+    let mut game = Game::default();
+    game.open_new_game_config();
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    for expected in [
+        "New game",
+        "Human side",
+        "White",
+        "Stockfish Elo",
+        "Enter: start game",
+    ] {
+        assert!(text.contains(expected), "missing {expected}");
+    }
+    assert!(!text.contains("Recent moves"));
+    key(&mut game, KeyCode::Right);
+    key(&mut game, KeyCode::Up);
+    key(&mut game, KeyCode::Esc);
+    assert!(!game.configuring);
+    assert_eq!(game.config_side, HumanSide::White);
+    assert_eq!(game.engine_elo, 1500);
+    assert_eq!(game.take_new_game_request(), None);
+}
+
+#[test]
+fn random_side_resolution_covers_both_colours() {
+    assert_eq!(
+        crate::resolve_human_side(HumanSide::Random, true),
+        shakmaty::Color::White
+    );
+    assert_eq!(
+        crate::resolve_human_side(HumanSide::Random, false),
+        shakmaty::Color::Black
+    );
+    assert_eq!(
+        crate::resolve_human_side(HumanSide::White, false),
+        shakmaty::Color::White
+    );
+    assert_eq!(
+        crate::resolve_human_side(HumanSide::Black, true),
+        shakmaty::Color::Black
+    );
+}
+
+#[test]
+fn engine_accepts_elo_configuration_before_search() {
+    let _guard = engine_lock();
+    unsafe { std::env::remove_var("FAKE_ENGINE_MODE") };
+    let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+    engine.configure_elo(2100).expect("configure Elo");
+    engine.start_search(START_FEN).expect("search start");
+    assert!(wait_bestmove(&mut engine, Duration::from_secs(2)).is_some());
 }

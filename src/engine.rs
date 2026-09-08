@@ -158,6 +158,18 @@ impl Engine {
         Ok(())
     }
 
+    pub(crate) fn configure_elo(&mut self, elo: u16) -> Result<(), EngineError> {
+        if self.searching {
+            self.reset();
+        }
+        self.send("setoption name UCI_LimitStrength value true")?;
+        self.send(&format!("setoption name UCI_Elo value {elo}"))?;
+        self.send("isready")?;
+        self.wait_for(|line| line == "readyok", READY_TIMEOUT)
+            .map_err(|_| EngineError::Ready("no readyok after Elo change".into()))?;
+        self.send("ucinewgame")
+    }
+
     // Send the current position and ask the engine to search. The search runs
     // asynchronously; results arrive via try_bestmove().
     pub(crate) fn start_search(&mut self, fen: &str) -> Result<(), EngineError> {

@@ -32,13 +32,16 @@ app runs a local two-player game and shows a notice.
 | Escape | Cancel selection or promotion |
 | `q`, `r`, `b`, `n` during promotion | Choose queen, rook, bishop, or knight |
 | `d` | Claim a draw if eligible (also works while choosing promotion) |
-| Shift+`n` (`N`) | Start a new game immediately |
-| `s` | Toggle which colour the human plays (human White/engine Black) and restart |
+| Shift+`n` (`N`) | Open new-game configuration |
+| Left/right in configuration | Choose White, Black, or random side |
+| Up/down in configuration | Adjust Stockfish Elo |
+| Enter / Escape in configuration | Start / cancel |
+| `s` | Toggle which colour the human plays and restart immediately |
 | `q` | Quit (outside promotion) |
 | Ctrl+C | Quit at any time |
 
 While the engine is thinking, move input is blocked but cursor movement, quit,
-restart and side-switch stay available; the side panel shows the engine's
+new-game configuration and side-switch stay available; the side panel shows the engine's
 thinking or error state.
 
 The board is painted with native Ratatui cells from the exact

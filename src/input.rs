@@ -1,11 +1,39 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use shakmaty::Role;
 
-use crate::game::Game;
+use crate::game::{ELO_STEP, Game, MAX_ELO, MIN_ELO};
 
 impl Game {
     pub(crate) fn key(&mut self, key: KeyEvent) -> bool {
         if key.kind != KeyEventKind::Press {
+            return false;
+        }
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return true;
+        }
+        if key.code == KeyCode::Char('N') && !self.configuring {
+            self.open_new_game_config();
+            return false;
+        }
+        if self.configuring {
+            match key.code {
+                KeyCode::Char('q') => return true,
+                KeyCode::Esc => self.cancel_new_game_config(),
+                KeyCode::Enter => self.request_configured_game(),
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.config_side = self.config_side.previous();
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    self.config_side = self.config_side.next();
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.engine_elo = self.engine_elo.saturating_add(ELO_STEP).min(MAX_ELO);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.engine_elo = self.engine_elo.saturating_sub(ELO_STEP).max(MIN_ELO);
+                }
+                _ => {}
+            }
             return false;
         }
         // On the engine's turn only cursor, quit, restart and side-switch are
@@ -21,9 +49,6 @@ impl Game {
             )
         {
             return false;
-        }
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            return true;
         }
         if key.code == KeyCode::Esc {
             self.selected = None;
@@ -52,14 +77,6 @@ impl Game {
                 (i32::from(self.cursor.file()), i32::from(self.cursor.rank()));
             match key.code {
                 KeyCode::Char('q') => return true,
-                KeyCode::Char('N') => {
-                    let side = self.engine_side;
-                    *self = if self.versus_engine {
-                        Self::new_vs_engine(side)
-                    } else {
-                        Self::default()
-                    };
-                }
                 KeyCode::Char('s') if self.versus_engine => self.switch_sides(),
                 KeyCode::Char('d') => self.claim_draw(),
                 KeyCode::Enter => self.select(),
