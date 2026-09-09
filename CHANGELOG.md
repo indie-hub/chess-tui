@@ -44,3 +44,22 @@ All notable changes to this project are documented here. The format follows
 - Captured-material formatting iterated from free-form counts to fixed
   Q/R/B/N/P groups, then to the current White/Black grouped layout, based
   on visual review.
+
+## [0.1.1] - 2026-09-08
+
+### Added
+
+- Red outline decoration on the king square when the king is in check,
+  making check state visually unambiguous. A test
+  (`checked_king_shows_red_outline`) verifies the outline colour and
+  placement.
+
+## [0.1.2] - 2026-09-08
+
+### Added
+
+- Cycle through legal destinations for the selected piece with `Tab`
+  (forward) and `Shift+Tab` / `BackTab` (backward), wrapping around the
+  sorted list of destination squares. A test
+  (`tab_cycles_selected_piece_legal_destinations`) exercises both
+  directions.
