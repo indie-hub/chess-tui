@@ -5,8 +5,8 @@ use crate::engine::Engine;
 use crate::game::{Game, HumanSide, MAX_SKILL, destination};
 use crate::render::{
     BOARD_CELLS_H, BOARD_CELLS_W, BOARD_X, BOARD_Y, MATERIAL_H, MATERIAL_Y, MIN_HEIGHT, MIN_WIDTH,
-    PANEL_X, RESULT_BG, RESULT_BODY_FG, SQUARE_H, SQUARE_W, base_bg, draw, sprite_bytes,
-    sprite_index,
+    PANEL_X, RESULT_BG, RESULT_BODY_FG, RESULT_POPUP_H, RESULT_POPUP_W, SQUARE_H, SQUARE_W,
+    base_bg, draw, sprite_bytes, sprite_index,
 };
 use crate::sprites::{SPRITE_SIZE, sprite_pixels};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -2155,6 +2155,79 @@ fn result_overlay_centered_on_board_not_terminal() {
         y,
         y + popup_h,
         BOARD_Y,
+    );
+}
+
+#[test]
+fn result_popup_edges_align_to_square_grid() {
+    let mut game = position(WHITE_MATES_FEN);
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::Black;
+    assert!(game.position.is_checkmate());
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    // The dimensions must be whole square cells and the interior wide enough
+    // for the longest possible reason string on one line.
+    assert_eq!(
+        RESULT_POPUP_W % SQUARE_W,
+        0,
+        "width is square-cell multiple"
+    );
+    assert_eq!(
+        RESULT_POPUP_H % SQUARE_H,
+        0,
+        "height is square-cell multiple"
+    );
+    assert!(
+        RESULT_POPUP_W - 2 >= "Draw: insufficient material.".len() as u16,
+        "interior fits the longest reason string"
+    );
+    // The popup sits on the board's grid: recompute its top-left the same way
+    // draw_result does, from exported constants, and check all four edges.
+    let popup_x = BOARD_X + ((BOARD_CELLS_W - RESULT_POPUP_W) / 2 / SQUARE_W) * SQUARE_W;
+    let popup_y = BOARD_Y + ((BOARD_CELLS_H - RESULT_POPUP_H) / 2 / SQUARE_H) * SQUARE_H;
+    assert_eq!(
+        (popup_x - BOARD_X) % SQUARE_W,
+        0,
+        "left edge on a square boundary"
+    );
+    assert_eq!(
+        (popup_x + RESULT_POPUP_W - BOARD_X) % SQUARE_W,
+        0,
+        "right edge on a square boundary"
+    );
+    assert_eq!(
+        (popup_y - BOARD_Y) % SQUARE_H,
+        0,
+        "top edge on a square boundary"
+    );
+    assert_eq!(
+        (popup_y + RESULT_POPUP_H - BOARD_Y) % SQUARE_H,
+        0,
+        "bottom edge on a square boundary"
+    );
+    assert!(
+        popup_x >= BOARD_X && popup_x + RESULT_POPUP_W <= BOARD_X + BOARD_CELLS_W,
+        "popup within the board's horizontal bounds"
+    );
+    assert!(
+        popup_y >= BOARD_Y && popup_y + RESULT_POPUP_H <= BOARD_Y + BOARD_CELLS_H,
+        "popup within the board's vertical bounds"
+    );
+    // Confirm the rendered popup actually occupies that grid-aligned rect: the
+    // title sits on the top border row and the right corner closes the box at
+    // the expected column.
+    let (tx, ty) = find_text(buffer, "Game over").expect("popup title");
+    assert_eq!(ty, popup_y, "rendered top border row equals grid top");
+    let mut corner_x = tx;
+    while buffer[(corner_x, ty)].symbol() != "┐" {
+        corner_x += 1;
+    }
+    assert_eq!(
+        corner_x,
+        popup_x + RESULT_POPUP_W - 1,
+        "rendered right corner closes the box on the grid"
     );
 }
 

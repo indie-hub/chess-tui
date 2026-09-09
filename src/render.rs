@@ -51,6 +51,13 @@ const RESULT_DRAW: [u8; 3] = SELECTED_OUTLINE;
 // light foreground keeps the border and reason line legible on top of it.
 pub(crate) const RESULT_BG: [u8; 3] = [20, 20, 20];
 pub(crate) const RESULT_BODY_FG: [u8; 3] = [235, 235, 235];
+// The result popup's width and height are whole multiples of the square cell,
+// and its top-left corner is placed on a square boundary, so every edge lands
+// exactly on a square edge: each square is either fully inside or fully outside
+// the popup, never bisected. The 30-column interior fits the longest possible
+// reason string ('Draw: insufficient material.', 28 chars) on one line.
+pub(crate) const RESULT_POPUP_W: u16 = SQUARE_W * 2;
+pub(crate) const RESULT_POPUP_H: u16 = SQUARE_H;
 
 // Center of a 16x8 square for the empty-legal marker: a 4x4 centred block that
 // covers <=25% of the square and keeps the base colour visible around it.
@@ -496,21 +503,21 @@ fn result_headline(game: &Game) -> (&'static str, [u8; 3]) {
 }
 
 // A centred popup over the final position announcing the result. The board,
-// panel and material are already rendered underneath; only the small covered
-// region is replaced. Sized to clear the footer (row 66) at the minimum
-// terminal size.
+// panel and material are already rendered underneath; only the covered region
+// is replaced. The box is sized and placed on the board's square grid so no
+// square is partially covered and its own decorations never bleed past the
+// edges, and it stays clear of the footer (row 66) at the minimum terminal
+// size. Both centring gaps are whole square cells.
 fn draw_result(frame: &mut Frame, game: &Game) {
     let Some(reason) = game.ending() else {
         return;
     };
     let (headline, color) = result_headline(game);
-    let width = 38;
-    let height = 6;
     let popup = Rect::new(
-        BOARD_X + BOARD_CELLS_W.saturating_sub(width) / 2,
-        BOARD_Y + BOARD_CELLS_H.saturating_sub(height) / 2,
-        width,
-        height,
+        BOARD_X + ((BOARD_CELLS_W - RESULT_POPUP_W) / 2 / SQUARE_W) * SQUARE_W,
+        BOARD_Y + ((BOARD_CELLS_H - RESULT_POPUP_H) / 2 / SQUARE_H) * SQUARE_H,
+        RESULT_POPUP_W,
+        RESULT_POPUP_H,
     );
     let popup_style = Style::default()
         .fg(to_rgb(RESULT_BODY_FG))
