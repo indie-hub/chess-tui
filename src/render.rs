@@ -40,6 +40,12 @@ const CHECK_OUTLINE: [u8; 3] = [255, 55, 55];
 const CAPTURE_OUTLINE: [u8; 3] = [230, 80, 20];
 const LEGAL_MARKER: [u8; 3] = [60, 200, 60];
 const LAST_MOVE_OUTLINE: [u8; 3] = [90, 130, 205];
+// Result-overlay headline colours reuse the square-decor palette: a win echoes
+// the green legal marker, a loss the red check outline, a draw the gold
+// selection outline.
+const RESULT_WIN: [u8; 3] = LEGAL_MARKER;
+const RESULT_LOSE: [u8; 3] = CHECK_OUTLINE;
+const RESULT_DRAW: [u8; 3] = SELECTED_OUTLINE;
 
 // Center of a 16x8 square for the empty-legal marker: a 4x4 centred block that
 // covers <=25% of the square and keeps the base colour visible around it.
@@ -462,6 +468,63 @@ fn draw_new_game_config(frame: &mut Frame, game: &Game) {
     );
 }
 
+// The end-of-game headline plus its accent colour. Any non-checkmate ending is
+// a draw; a checkmate names the side that delivered it. Versus the engine the
+// human side is engine_side.other(), so the headline is first-person; in local
+// two-player play the winning colour is named instead.
+fn result_headline(game: &Game) -> (&'static str, [u8; 3]) {
+    if !game.position.is_checkmate() {
+        return ("DRAW", RESULT_DRAW);
+    }
+    let winner = !game.position.turn();
+    if !game.versus_engine {
+        if winner == Side::White {
+            return ("WHITE WINS", RESULT_WIN);
+        }
+        return ("BLACK WINS", RESULT_WIN);
+    }
+    if winner == game.engine_side.other() {
+        ("YOU WIN", RESULT_WIN)
+    } else {
+        ("YOU LOSE", RESULT_LOSE)
+    }
+}
+
+// A centred popup over the final position announcing the result. The board,
+// panel and material are already rendered underneath; only the small covered
+// region is replaced. Sized to clear the footer (row 66) at the minimum
+// terminal size.
+fn draw_result(frame: &mut Frame, game: &Game) {
+    let Some(reason) = game.ending() else {
+        return;
+    };
+    let (headline, color) = result_headline(game);
+    let area = frame.area();
+    let width = 38;
+    let height = 6;
+    let popup = Rect::new(
+        area.width.saturating_sub(width) / 2,
+        area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    );
+    let text = vec![
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            headline,
+            Style::default().fg(to_rgb(color)),
+        )]),
+        Line::from(reason),
+        Line::from(""),
+    ];
+    frame.render_widget(
+        Paragraph::new(text)
+            .alignment(ratatui::layout::Alignment::Center)
+            .block(Block::default().title(" Game over ").borders(Borders::ALL)),
+        popup,
+    );
+}
+
 pub(crate) fn draw(frame: &mut Frame, game: &Game) {
     let area = frame.area();
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
@@ -494,6 +557,7 @@ pub(crate) fn draw(frame: &mut Frame, game: &Game) {
     draw_board(frame, game, &legal);
     draw_panel(frame, game);
     draw_material(frame, game);
+    draw_result(frame, game);
     // Footer is at most two lines: one compact controls+legend line and a
     // dynamic line. The dynamic line shows the draw-availability hint only
     // when a draw claim is live and no other feedback is pending.

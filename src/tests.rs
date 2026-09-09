@@ -9,7 +9,7 @@ use crate::render::{
 };
 use crate::sprites::{SPRITE_SIZE, sprite_pixels};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::{Terminal, backend::TestBackend, style::Color};
+use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, style::Color};
 use sha2::{Digest, Sha256};
 use shakmaty::{CastlingMode, Chess, Position, Role, Square, fen::Fen, uci::UciMove};
 use std::collections::HashSet;
@@ -28,6 +28,12 @@ fn engine_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+// Scholar's mate: White's queen has just taken on f7; Black is checkmated.
+const WHITE_MATES_FEN: &str = "r1bqkbnr/pppp1Qpp/2n5/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4";
+// Fool's mate: Black's queen on h4 checkmates the unmoved White king on e1.
+const BLACK_MATES_FEN: &str = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3";
+// King and queen stalemate the lone king on h8 (Black to move, not in check).
+const STALEMATE_FEN: &str = "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1";
 
 fn fake_engine_path() -> String {
     if let Ok(path) = std::env::var("CARGO_BIN_EXE_fake_engine") {
@@ -101,6 +107,54 @@ fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
         .iter()
         .map(|c| c.symbol())
         .collect()
+}
+
+// Location of the first cell of `needle`, scanning left-to-right then top to
+// bottom. Overlay text is ASCII over the board's single-cell glyphs, so a
+// column-wise char scan matches the buffer layout exactly (a byte-indexed
+// substring search would be thrown off by the multi-byte half-block glyphs).
+fn find_text(buffer: &Buffer, needle: &str) -> Option<(u16, u16)> {
+    let area = buffer.area;
+    let chars: Vec<char> = needle.chars().collect();
+    for y in 0..area.height {
+        if chars.len() as u16 > area.width {
+            continue;
+        }
+        for x in 0..=(area.width - chars.len() as u16) {
+            if chars
+                .iter()
+                .enumerate()
+                .all(|(i, &ch)| buffer[(x + i as u16, y)].symbol().starts_with(ch))
+            {
+                return Some((x, y));
+            }
+        }
+    }
+    None
+}
+
+fn assert_headline_color(buffer: &Buffer, headline: &str, rgb: (u8, u8, u8)) {
+    let (x, y) =
+        find_text(buffer, headline).unwrap_or_else(|| panic!("headline {headline} not found"));
+    assert_eq!(
+        buffer[(x, y)].fg,
+        Color::Rgb(rgb.0, rgb.1, rgb.2),
+        "headline {headline} accent colour"
+    );
+}
+
+// The result popup is an overlay: the board/panel/material/footer must still
+// be drawn underneath it, never skipped for an early return.
+fn assert_underlay(text: &str) {
+    assert!(
+        text.contains("Recent moves"),
+        "recent-moves panel still rendered"
+    );
+    assert!(text.contains("Material"), "material panel still rendered");
+    assert!(
+        text.contains("corners=cursor"),
+        "footer action hints still rendered"
+    );
 }
 
 fn sq(file: u16, row: u16) -> (u16, u16) {
@@ -1953,6 +2007,119 @@ fn new_game_configuration_renders_and_can_be_cancelled() {
     assert_eq!(game.config_side, HumanSide::White);
     assert_eq!(game.engine_skill, MAX_SKILL);
     assert_eq!(game.take_new_game_request(), None);
+}
+
+#[test]
+fn result_overlay_you_win_when_human_checkmates_engine() {
+    let mut game = position(WHITE_MATES_FEN);
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::Black; // human is White and just mated
+    assert!(game.position.is_checkmate());
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    let buffer = terminal.backend().buffer();
+    assert!(text.contains("YOU WIN"), "human-delivered mate headline");
+    assert!(!text.contains("YOU LOSE"));
+    assert!(
+        text.contains("Checkmate! white wins."),
+        "reason under headline"
+    );
+    assert!(
+        text.contains("You: White vs Stockfish"),
+        "engine header intact"
+    );
+    assert_headline_color(buffer, "YOU WIN", (60, 200, 60));
+    assert_underlay(&text);
+}
+
+#[test]
+fn result_overlay_you_lose_when_engine_checkmates_human() {
+    let mut game = position(WHITE_MATES_FEN);
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::White; // human is Black, engine White mates
+    assert!(game.position.is_checkmate());
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    let buffer = terminal.backend().buffer();
+    assert!(text.contains("YOU LOSE"), "engine-delivered mate headline");
+    assert!(!text.contains("YOU WIN"));
+    assert!(
+        text.contains("Checkmate! white wins."),
+        "reason under headline"
+    );
+    assert!(
+        text.contains("You: Black vs Stockfish"),
+        "engine header intact"
+    );
+    assert_headline_color(buffer, "YOU LOSE", (255, 55, 55));
+    assert_underlay(&text);
+}
+
+#[test]
+fn result_overlay_draw_for_stalemate_in_engine_mode() {
+    let mut game = position(STALEMATE_FEN);
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::Black;
+    assert!(game.position.is_stalemate());
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    let buffer = terminal.backend().buffer();
+    assert!(text.contains("DRAW"), "stalemate headline");
+    assert!(!text.contains("YOU WIN"));
+    assert!(!text.contains("YOU LOSE"));
+    assert!(text.contains("Draw: stalemate."), "reason under headline");
+    assert_headline_color(buffer, "DRAW", (255, 210, 40));
+    assert_underlay(&text);
+}
+
+#[test]
+fn result_overlay_local_white_wins_on_checkmate() {
+    let game = position(WHITE_MATES_FEN); // local two-player, no engine
+    assert!(game.position.is_checkmate());
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    let buffer = terminal.backend().buffer();
+    assert!(text.contains("WHITE WINS"), "local checkmate headline");
+    assert!(
+        text.contains("Checkmate! white wins."),
+        "reason under headline"
+    );
+    assert!(text.contains("Local two-player"), "local header intact");
+    assert_headline_color(buffer, "WHITE WINS", (60, 200, 60));
+    assert_underlay(&text);
+}
+
+#[test]
+fn result_overlay_local_black_wins_on_checkmate() {
+    let game = position(BLACK_MATES_FEN); // fool's mate: Black mates White
+    assert!(game.position.is_checkmate());
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    let buffer = terminal.backend().buffer();
+    assert!(text.contains("BLACK WINS"), "local checkmate headline");
+    assert!(
+        text.contains("Checkmate! black wins."),
+        "reason under headline"
+    );
+    assert!(text.contains("Local two-player"), "local header intact");
+    assert_headline_color(buffer, "BLACK WINS", (60, 200, 60));
+    assert_underlay(&text);
+}
+
+#[test]
+fn no_result_overlay_before_game_ends() {
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &Game::default());
+    let text = buffer_text(&terminal);
+    assert!(!text.contains("Game over"));
+    assert!(!text.contains("YOU WIN"));
+    assert!(!text.contains("WHITE WINS"));
+    assert!(!text.contains("DRAW"));
 }
 
 #[test]
