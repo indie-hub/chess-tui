@@ -10,7 +10,7 @@ mod sprites;
 mod tests;
 
 use std::io;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use engine::Engine;
@@ -27,15 +27,19 @@ fn resolve_human_side(choice: HumanSide, random_white: bool) -> Side {
     }
 }
 
+// A fair, std-random coin flip backed by rand's documented random-boolean
+// API, drawing from the thread-local RNG.
+fn random_coin_flip() -> bool {
+    rand::random()
+}
+
 fn start_configured_game(
     engine: &mut Option<Engine>,
     game: &mut Game,
     choice: HumanSide,
     skill: u16,
 ) {
-    let random_white = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(true, |duration| duration.subsec_nanos() % 2 == 0);
+    let random_white = random_coin_flip();
     let human_side = resolve_human_side(choice, random_white);
     if let Some(engine) = engine.as_mut() {
         match engine.configure_skill(skill) {

@@ -10,6 +10,7 @@ ratatui = "0.30"
 crossterm = "0.29"
 shakmaty = "0.30"
 sha2 = "0.10"
+rand = "0.10.2"
 
 [dev-dependencies]
 image = { version = "0.25.10", default-features = false, features = ["png"] }

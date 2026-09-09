@@ -2172,6 +2172,24 @@ fn random_side_resolution_covers_both_colours() {
     );
 }
 
+// The entropy source itself must be a fair coin. A raw low-resolution clock
+// parity bit returns a near-constant value, so this samples 200 flips and
+// requires a wide band (60-140) that a biased source fails yet real fairness
+// virtually never leaves.
+#[test]
+fn random_coin_flip_is_balanced() {
+    let mut count = 0;
+    for _ in 0..200 {
+        if crate::random_coin_flip() {
+            count += 1;
+        }
+    }
+    assert!(
+        (60..=140).contains(&count),
+        "coin flip unbalanced: {count} true out of 200"
+    );
+}
+
 #[test]
 fn engine_accepts_skill_configuration_before_search() {
     let _guard = engine_lock();
