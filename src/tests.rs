@@ -2232,6 +2232,65 @@ fn result_popup_edges_align_to_square_grid() {
 }
 
 #[test]
+fn result_popup_clears_underlying_board_cells() {
+    let mut game = position(WHITE_MATES_FEN);
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::White; // human is Black, engine White mates
+    assert!(game.position.is_checkmate());
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    assert!(
+        find_text(buffer, "YOU LOSE").is_some(),
+        "headline must be rendered"
+    );
+    let popup_x = BOARD_X + ((BOARD_CELLS_W - RESULT_POPUP_W) / 2 / SQUARE_W) * SQUARE_W;
+    let popup_y = BOARD_Y + ((BOARD_CELLS_H - RESULT_POPUP_H) / 2 / SQUARE_H) * SQUARE_H;
+    let popup_bg = Color::Rgb(RESULT_BG[0], RESULT_BG[1], RESULT_BG[2]);
+    // Every cell inside the popup must be one of its own glyphs (border, title,
+    // headline, reason, or a blank space) recoloured with the popup background
+    // -- never a leftover board/sprite character that style-only recolouring
+    // would otherwise keep.
+    let expected = |symbol: &str| {
+        let mut chars = symbol.chars();
+        match (chars.next(), chars.next()) {
+            (Some(c), None) => {
+                c == ' ' || matches!(c, '─' | '│' | '┌' | '┐' | '└' | '┘') || c.is_ascii_graphic()
+            }
+            _ => false,
+        }
+    };
+    let (mut text_glyphs, mut box_glyphs) = (0usize, 0usize);
+    for y in popup_y..(popup_y + RESULT_POPUP_H) {
+        for x in popup_x..(popup_x + RESULT_POPUP_W) {
+            let cell = &buffer[(x, y)];
+            assert_eq!(cell.bg, popup_bg, "popup background at ({x},{y})");
+            let symbol = cell.symbol();
+            assert!(
+                expected(symbol),
+                "leftover glyph {symbol:?} inside popup at ({x},{y})"
+            );
+            if symbol == "─"
+                || symbol == "│"
+                || symbol == "┌"
+                || symbol == "┐"
+                || symbol == "└"
+                || symbol == "┘"
+            {
+                box_glyphs += 1;
+            } else if symbol != " " {
+                text_glyphs += 1;
+            }
+        }
+    }
+    assert!(
+        box_glyphs >= RESULT_POPUP_W as usize + RESULT_POPUP_H as usize - 2,
+        "border drawn"
+    );
+    assert!(text_glyphs > 0, "popup text drawn");
+}
+
+#[test]
 fn result_popup_paints_distinct_background_and_legible_body() {
     let mut game = position(WHITE_MATES_FEN);
     game.versus_engine = true;

@@ -5,7 +5,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 use shakmaty::{Color as Side, Move, Position, Role, Square};
 
@@ -531,6 +531,10 @@ fn draw_result(frame: &mut Frame, game: &Game) {
         Line::from(reason),
         Line::from(""),
     ];
+    // Style-only overlays recolour cells but leave whatever board glyph a cell
+    // held, so first clear the whole popup area to blank cells; nothing from
+    // the final position can then bleed through the border, headline or reason.
+    frame.render_widget(Clear, popup);
     frame.render_widget(
         Paragraph::new(text)
             .style(popup_style)
