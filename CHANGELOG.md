@@ -3,6 +3,24 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.0] - 2026-09-09
+
+### Added
+
+- End-of-game result overlay: a centred popup over the board announces
+  `YOU WIN`, `YOU LOSE`, or `DRAW` when playing Stockfish (phrased from
+  the human's side), and `WHITE WINS`, `BLACK WINS`, or `DRAW` in local
+  two-player mode. The popup sits above the board, panel, and footer,
+  which remain visible underneath.
+
+### Fixed
+
+- Random human-side selection (`n` configuration screen) previously
+  always resolved to one colour because the parity bit sampled from the
+  system clock was effectively constant on real hardware. Now uses the
+  `rand` crate for a fair 50/50 coin flip, guarded by a 200-sample
+  distribution test.
+
 ## [0.1.0] - 2026-09-08
 
 ### Added
