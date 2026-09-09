@@ -19,7 +19,6 @@ pub(crate) const MIN_HEIGHT: u16 = 68;
 // (two sprite pixel rows per half-block cell).
 pub(crate) const SQUARE_W: u16 = 16;
 pub(crate) const SQUARE_H: u16 = 8;
-#[cfg(test)]
 pub(crate) const BOARD_CELLS_W: u16 = 128;
 pub(crate) const BOARD_CELLS_H: u16 = 64;
 pub(crate) const BOARD_X: u16 = 2;
@@ -499,12 +498,11 @@ fn draw_result(frame: &mut Frame, game: &Game) {
         return;
     };
     let (headline, color) = result_headline(game);
-    let area = frame.area();
     let width = 38;
     let height = 6;
     let popup = Rect::new(
-        area.width.saturating_sub(width) / 2,
-        area.height.saturating_sub(height) / 2,
+        BOARD_X + BOARD_CELLS_W.saturating_sub(width) / 2,
+        BOARD_Y + BOARD_CELLS_H.saturating_sub(height) / 2,
         width,
         height,
     );

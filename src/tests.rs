@@ -2123,6 +2123,36 @@ fn no_result_overlay_before_game_ends() {
 }
 
 #[test]
+fn result_overlay_centered_on_board_not_terminal() {
+    let mut game = position(WHITE_MATES_FEN);
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::Black;
+    assert!(game.position.is_checkmate());
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    let (x, y) = find_text(buffer, "YOU WIN").expect("headline found");
+    let popup_w = 38u16;
+    let popup_h = 6u16;
+    let board_right = BOARD_X + BOARD_CELLS_W;
+    let board_bottom = BOARD_Y + BOARD_CELLS_H;
+    assert!(
+        x >= BOARD_X && x + popup_w <= board_right,
+        "popup x range [{}, {}) must be within board [{}, {x})",
+        x,
+        x + popup_w,
+        BOARD_X,
+    );
+    assert!(
+        y >= BOARD_Y && y + popup_h <= board_bottom,
+        "popup y range [{}, {}) must be within board [{}, {y})",
+        y,
+        y + popup_h,
+        BOARD_Y,
+    );
+}
+
+#[test]
 fn random_side_resolution_covers_both_colours() {
     assert_eq!(
         crate::resolve_human_side(HumanSide::Random, true),
