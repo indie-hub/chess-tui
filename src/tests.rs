@@ -5,7 +5,8 @@ use crate::engine::Engine;
 use crate::game::{Game, HumanSide, MAX_SKILL, destination};
 use crate::render::{
     BOARD_CELLS_H, BOARD_CELLS_W, BOARD_X, BOARD_Y, MATERIAL_H, MATERIAL_Y, MIN_HEIGHT, MIN_WIDTH,
-    PANEL_X, SQUARE_H, SQUARE_W, base_bg, draw, sprite_bytes, sprite_index,
+    PANEL_X, RESULT_BG, RESULT_BODY_FG, SQUARE_H, SQUARE_W, base_bg, draw, sprite_bytes,
+    sprite_index,
 };
 use crate::sprites::{SPRITE_SIZE, sprite_pixels};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -117,20 +118,25 @@ fn find_text(buffer: &Buffer, needle: &str) -> Option<(u16, u16)> {
     let area = buffer.area;
     let chars: Vec<char> = needle.chars().collect();
     for y in 0..area.height {
-        if chars.len() as u16 > area.width {
-            continue;
-        }
-        for x in 0..=(area.width - chars.len() as u16) {
-            if chars
-                .iter()
-                .enumerate()
-                .all(|(i, &ch)| buffer[(x + i as u16, y)].symbol().starts_with(ch))
-            {
-                return Some((x, y));
-            }
+        if let Some(x) = find_in_row(buffer, &chars, y) {
+            return Some((x, y));
         }
     }
     None
+}
+
+// Scan a single buffer row for the leading cell of `chars`.
+fn find_in_row(buffer: &Buffer, chars: &[char], y: u16) -> Option<u16> {
+    let area = buffer.area;
+    if chars.len() as u16 > area.width {
+        return None;
+    }
+    (0..=(area.width - chars.len() as u16)).find(|&x| {
+        chars
+            .iter()
+            .enumerate()
+            .all(|(i, &ch)| buffer[(x + i as u16, y)].symbol().starts_with(ch))
+    })
 }
 
 fn assert_headline_color(buffer: &Buffer, headline: &str, rgb: (u8, u8, u8)) {
@@ -2150,6 +2156,59 @@ fn result_overlay_centered_on_board_not_terminal() {
         y + popup_h,
         BOARD_Y,
     );
+}
+
+#[test]
+fn result_popup_paints_distinct_background_and_legible_body() {
+    let mut game = position(WHITE_MATES_FEN);
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::White; // human is Black, engine White mates
+    assert!(game.position.is_checkmate());
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let buffer = terminal.backend().buffer();
+    let popup_bg = Color::Rgb(RESULT_BG[0], RESULT_BG[1], RESULT_BG[2]);
+    let body_fg = Color::Rgb(RESULT_BODY_FG[0], RESULT_BODY_FG[1], RESULT_BODY_FG[2]);
+    // The popup title sits on the top border row, so rows below it are the
+    // popup interior, not the board or the panel's own status text.
+    let (tx, ty) = find_text(buffer, "Game over").expect("popup title");
+    let headline: Vec<char> = "YOU LOSE".chars().collect();
+    let reason: Vec<char> = "Checkmate! white wins.".chars().collect();
+    // The headline keeps its per-outcome accent colour, now on the popup's own
+    // background rather than whatever board square it covers.
+    let hx = find_in_row(buffer, &headline, ty + 2).expect("headline row");
+    assert_eq!(
+        buffer[(hx, ty + 2)].fg,
+        Color::Rgb(255, 55, 55),
+        "headline accent"
+    );
+    assert_eq!(buffer[(hx, ty + 2)].bg, popup_bg, "headline background");
+    // The reason line is legible: an explicit light foreground on the popup
+    // background, provably not inherited from the board square beneath.
+    let rx = find_in_row(buffer, &reason, ty + 3).expect("reason row");
+    assert_eq!(buffer[(rx, ty + 3)].fg, body_fg, "reason foreground");
+    assert_eq!(buffer[(rx, ty + 3)].bg, popup_bg, "reason background");
+    // The box border (top edge between the title and the right corner) carries
+    // the popup background too, instead of a board square colour.
+    let mut border_glyphs = 0;
+    let mut x = tx;
+    while x < MIN_WIDTH {
+        let cell = &buffer[(x, ty)];
+        match cell.symbol() {
+            "┐" => {
+                assert_eq!(cell.bg, popup_bg, "right corner background");
+                border_glyphs += 1;
+                break;
+            }
+            "─" => {
+                assert_eq!(cell.bg, popup_bg, "top border background at col {x}");
+                border_glyphs += 1;
+            }
+            _ => {}
+        }
+        x += 1;
+    }
+    assert!(border_glyphs > 0, "no top-border glyph found for the popup");
 }
 
 #[test]

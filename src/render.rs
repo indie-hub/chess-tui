@@ -45,6 +45,12 @@ const LAST_MOVE_OUTLINE: [u8; 3] = [90, 130, 205];
 const RESULT_WIN: [u8; 3] = LEGAL_MARKER;
 const RESULT_LOSE: [u8; 3] = CHECK_OUTLINE;
 const RESULT_DRAW: [u8; 3] = SELECTED_OUTLINE;
+// The result popup's own surface, applied as an explicit style so its border
+// and body text never inherit a board square's colours. The dark neutral
+// background is distinct from every square base colour and piece pixel; the
+// light foreground keeps the border and reason line legible on top of it.
+pub(crate) const RESULT_BG: [u8; 3] = [20, 20, 20];
+pub(crate) const RESULT_BODY_FG: [u8; 3] = [235, 235, 235];
 
 // Center of a 16x8 square for the empty-legal marker: a 4x4 centred block that
 // covers <=25% of the square and keeps the base colour visible around it.
@@ -506,6 +512,9 @@ fn draw_result(frame: &mut Frame, game: &Game) {
         width,
         height,
     );
+    let popup_style = Style::default()
+        .fg(to_rgb(RESULT_BODY_FG))
+        .bg(to_rgb(RESULT_BG));
     let text = vec![
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -517,8 +526,14 @@ fn draw_result(frame: &mut Frame, game: &Game) {
     ];
     frame.render_widget(
         Paragraph::new(text)
+            .style(popup_style)
             .alignment(ratatui::layout::Alignment::Center)
-            .block(Block::default().title(" Game over ").borders(Borders::ALL)),
+            .block(
+                Block::default()
+                    .title(" Game over ")
+                    .borders(Borders::ALL)
+                    .style(popup_style),
+            ),
         popup,
     );
 }
