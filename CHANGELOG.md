@@ -3,6 +3,21 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.0] - 2026-09-10
+
+### Added
+
+- Clocks: choose Unlimited (default, unchanged) or a timed preset --
+  `3+2`, `5+3`, or `10+5` -- in the new-game config screen. Only the side
+  to move's clock runs, tracked with monotonic time so no real time leaks
+  onto a clock while the config screen, the promotion chooser, or a
+  finished game isn't actually being played. Running out of time ends the
+  game immediately with the same `YOU WIN`/`YOU LOSE` or `WHITE WINS`/
+  `BLACK WINS` result popup a checkmate produces. Both clocks are shown in
+  the side panel. Stockfish receives the real remaining time and
+  increment over UCI in timed games, so it manages its own clock like a
+  real opponent would, instead of always thinking for a fixed second.
+
 ## [0.4.0] - 2026-09-10
 
 ### Added
