@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-09-10
+
+### Added
+
+- Rematch: press `r` from the game-over result popup to restart with the
+  same side and Stockfish Skill Level (a random side re-flips, same as any
+  other new game). Only active once the game has ended. The result popup
+  now lists all four post-game actions -- `r rematch`, `s sides`, `n new`,
+  `q quit` -- naming the existing swap-and-restart, new-game-configuration,
+  and quit actions alongside the new one.
+
 ## [0.2.0] - 2026-09-09
 
 ### Added
