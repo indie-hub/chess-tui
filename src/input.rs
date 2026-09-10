@@ -24,16 +24,25 @@ impl Game {
                 KeyCode::Char('q') => return true,
                 KeyCode::Esc => self.cancel_new_game_config(),
                 KeyCode::Enter => self.request_configured_game(),
+                KeyCode::Tab | KeyCode::BackTab => {
+                    self.config_time_focused = !self.config_time_focused;
+                }
+                KeyCode::Left | KeyCode::Char('h') if self.config_time_focused => {
+                    self.config_time = self.config_time.previous();
+                }
+                KeyCode::Right | KeyCode::Char('l') if self.config_time_focused => {
+                    self.config_time = self.config_time.next();
+                }
                 KeyCode::Left | KeyCode::Char('h') => {
                     self.config_side = self.config_side.previous();
                 }
                 KeyCode::Right | KeyCode::Char('l') => {
                     self.config_side = self.config_side.next();
                 }
-                KeyCode::Up | KeyCode::Char('k') => {
+                KeyCode::Up | KeyCode::Char('k') if !self.config_time_focused => {
                     self.engine_skill = self.engine_skill.saturating_add(SKILL_STEP).min(MAX_SKILL);
                 }
-                KeyCode::Down | KeyCode::Char('j') => {
+                KeyCode::Down | KeyCode::Char('j') if !self.config_time_focused => {
                     self.engine_skill = self.engine_skill.saturating_sub(SKILL_STEP);
                 }
                 _ => {}

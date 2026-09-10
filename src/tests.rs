@@ -2,7 +2,7 @@
 
 use crate::drive_engine;
 use crate::engine::Engine;
-use crate::game::{Game, HumanSide, MAX_SKILL, destination};
+use crate::game::{ClockState, Game, HumanSide, MAX_SKILL, TimePreset, destination};
 use crate::render::{
     BOARD_CELLS_H, BOARD_CELLS_W, BOARD_X, BOARD_Y, MATERIAL_H, MATERIAL_Y, MIN_HEIGHT, MIN_WIDTH,
     PANEL_X, RESULT_BG, RESULT_BODY_FG, RESULT_POPUP_H, RESULT_POPUP_W, SQUARE_H, SQUARE_W,
@@ -1275,7 +1275,7 @@ fn engine_starts_and_bestmove_enters_through_game_play() {
         std::env::set_var("FAKE_ENGINE_MODE", "");
     }
     let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
-    engine.start_search(START_FEN).expect("search start");
+    engine.start_search(START_FEN, None).expect("search start");
     let mv = wait_bestmove(&mut engine, Duration::from_secs(3)).expect("bestmove");
     assert_eq!(mv, "e2e4");
 
@@ -1290,6 +1290,162 @@ fn engine_starts_and_bestmove_enters_through_game_play() {
     assert!(game.engine_to_move());
     assert!(!engine.is_searching());
     drop(engine);
+}
+
+#[test]
+fn engine_go_command_unlimited_is_fixed_movetime() {
+    assert_eq!(
+        crate::engine::go_command(None),
+        "go movetime 1000",
+        "unlimited command is byte-for-byte today's fixed movetime"
+    );
+}
+
+#[test]
+fn engine_go_command_timed_uses_absolute_white_black_time() {
+    let state = ClockState {
+        white: Duration::from_secs(120),
+        black: Duration::from_secs(60),
+        increment: Duration::from_secs(3),
+        side_to_move: shakmaty::Color::Black,
+    };
+    assert_eq!(
+        crate::engine::go_command(Some(state)),
+        "go wtime 120000 btime 60000 winc 3000 binc 3000",
+        "wtime/btime map to absolute White/Black time regardless of side_to_move"
+    );
+    // A whole-minute preset converts to whole milliseconds exactly.
+    let state = ClockState {
+        white: Duration::from_secs(300),
+        black: Duration::from_secs(300),
+        increment: Duration::from_secs(3),
+        side_to_move: shakmaty::Color::White,
+    };
+    assert_eq!(
+        crate::engine::go_command(Some(state)),
+        "go wtime 300000 btime 300000 winc 3000 binc 3000"
+    );
+}
+
+#[test]
+fn engine_timed_search_sends_wtime_btime_over_the_wire() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "");
+    }
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    game.apply_time_control(TimePreset::Rapid5_3);
+    let state = game.clock_state().expect("timed game has a clock");
+    let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+    engine
+        .start_search(START_FEN, Some(state))
+        .expect("search start");
+    assert_eq!(
+        engine.last_go(),
+        Some("go wtime 300000 btime 300000 winc 3000 binc 3000"),
+        "timed game sends absolute White/Black times and the shared increment"
+    );
+    let mv = wait_bestmove(&mut engine, Duration::from_secs(3)).expect("bestmove");
+    assert_eq!(mv, "e2e4");
+}
+
+#[test]
+fn engine_unlimited_search_keeps_movetime_over_the_wire() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "");
+    }
+    let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+    engine.start_search(START_FEN, None).expect("search start");
+    assert_eq!(
+        engine.last_go(),
+        Some("go movetime 1000"),
+        "unlimited game keeps the fixed movetime byte-for-byte"
+    );
+    let mv = wait_bestmove(&mut engine, Duration::from_secs(3)).expect("bestmove");
+    assert_eq!(mv, "e2e4");
+}
+
+#[test]
+fn engine_watchdog_unlimited_keeps_ten_second_ceiling() {
+    assert_eq!(
+        crate::engine::watchdog_timeout(None),
+        Duration::from_secs(10),
+        "unlimited watchdog stays at today's 10s ceiling"
+    );
+}
+
+#[test]
+fn engine_watchdog_timed_tracks_remaining_plus_increment() {
+    // The reported bug: a timed search was still watched with the fixed 10s
+    // ceiling sized for the old 1s movetime, so a long legitimate think
+    // tripped it. The timed watchdog must follow the searching side's budget,
+    // which is strictly more generous than 10s here.
+    let state = ClockState {
+        white: Duration::from_secs(120),
+        black: Duration::from_secs(40),
+        increment: Duration::from_secs(3),
+        side_to_move: shakmaty::Color::Black,
+    };
+    assert_eq!(
+        crate::engine::watchdog_timeout(Some(state)),
+        Duration::from_secs(45),
+        "side to move's remaining (40s) + increment (3s) + margin (2s)"
+    );
+    let state = ClockState {
+        white: Duration::from_secs(30),
+        black: Duration::from_secs(30),
+        increment: Duration::from_secs(3),
+        side_to_move: shakmaty::Color::White,
+    };
+    assert_eq!(
+        crate::engine::watchdog_timeout(Some(state)),
+        Duration::from_secs(35),
+        "well above the old 10s ceiling, so a 10-35s think no longer trips it"
+    );
+}
+
+#[test]
+fn engine_watchdog_timed_capped_when_clock_large() {
+    // A 10+5 preset starts with 600s on the clock; the watchdog must not wait
+    // the whole thing out, so it is capped at the bounded 60s upper bound.
+    let state = ClockState {
+        white: Duration::from_secs(600),
+        black: Duration::from_secs(600),
+        increment: Duration::from_secs(5),
+        side_to_move: shakmaty::Color::White,
+    };
+    assert_eq!(
+        crate::engine::watchdog_timeout(Some(state)),
+        Duration::from_secs(60),
+        "capped at the sane upper bound even with a large clock"
+    );
+}
+
+#[test]
+fn engine_watchdog_still_catches_a_hung_timed_search() {
+    let _guard = engine_lock();
+    unsafe {
+        std::env::set_var("FAKE_ENGINE_MODE", "timeout");
+    }
+    // A small remaining clock yields a short computed budget (500ms + 0 +
+    // 2s margin = 2.5s), so a hung engine is still flagged in bounded time.
+    let state = ClockState {
+        white: Duration::from_millis(500),
+        black: Duration::from_millis(500),
+        increment: Duration::ZERO,
+        side_to_move: shakmaty::Color::White,
+    };
+    let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
+    engine
+        .start_search(START_FEN, Some(state))
+        .expect("search start");
+    assert!(!engine.search_timed_out(), "well within the 2.5s budget");
+    std::thread::sleep(Duration::from_millis(2700));
+    assert!(
+        engine.search_timed_out(),
+        "a search that exceeds its computed bounded timeout still trips"
+    );
 }
 
 #[test]
@@ -1311,7 +1467,7 @@ fn engine_illegal_bestmove_is_rejected_by_legality() {
         std::env::set_var("FAKE_ENGINE_MODE", "illegal");
     }
     let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
-    engine.start_search(START_FEN).expect("search start");
+    engine.start_search(START_FEN, None).expect("search start");
     let mv = wait_bestmove(&mut engine, Duration::from_secs(3)).expect("bestmove");
     assert_eq!(mv, "e2e5");
     let game = Game::new_vs_engine(shakmaty::Color::Black);
@@ -1327,7 +1483,7 @@ fn engine_no_bestmove_is_a_protocol_error() {
         std::env::set_var("FAKE_ENGINE_MODE", "none");
     }
     let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
-    engine.start_search(START_FEN).expect("search start");
+    engine.start_search(START_FEN, None).expect("search start");
     let deadline = Instant::now() + Duration::from_secs(3);
     let mut got_error = false;
     while Instant::now() < deadline {
@@ -1348,7 +1504,7 @@ fn engine_search_stays_pending_without_response() {
         std::env::set_var("FAKE_ENGINE_MODE", "timeout");
     }
     let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
-    engine.start_search(START_FEN).expect("search start");
+    engine.start_search(START_FEN, None).expect("search start");
     std::thread::sleep(Duration::from_millis(100));
     assert!(engine.is_searching());
     assert!(engine.try_bestmove().is_none());
@@ -1760,7 +1916,7 @@ fn engine_delayed_bestmove_eventually_arrives() {
         std::env::set_var("FAKE_ENGINE_MODE", "slow");
     }
     let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
-    engine.start_search(START_FEN).expect("search start");
+    engine.start_search(START_FEN, None).expect("search start");
     assert!(
         engine.try_bestmove().is_none(),
         "must still be pending immediately"
@@ -1776,7 +1932,7 @@ fn engine_malformed_bestmove_is_rejected() {
         std::env::set_var("FAKE_ENGINE_MODE", "malformed");
     }
     let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
-    engine.start_search(START_FEN).expect("search start");
+    engine.start_search(START_FEN, None).expect("search start");
     let deadline = Instant::now() + Duration::from_secs(3);
     let mut rejected = false;
     while Instant::now() < deadline {
@@ -1850,7 +2006,7 @@ fn engine_quit_while_thinking_reaps_child() {
         std::env::set_var("FAKE_ENGINE_MODE", "slow");
     }
     let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
-    engine.start_search(START_FEN).expect("search start");
+    engine.start_search(START_FEN, None).expect("search start");
     std::thread::sleep(Duration::from_millis(200));
     drop(engine); // quit during thinking; sleeping fake is killed, then reaped
 }
@@ -1863,7 +2019,7 @@ fn engine_restart_while_thinking_starts_fresh_search() {
     }
     let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
     // Engine starts searching the initial position (would answer e2e4).
-    engine.start_search(START_FEN).expect("search start");
+    engine.start_search(START_FEN, None).expect("search start");
     std::thread::sleep(Duration::from_millis(100));
     // Restart resets the game; the in-flight search must be cancelled.
     let mut game = Game::new_vs_engine(shakmaty::Color::Black);
@@ -1985,7 +2141,10 @@ fn new_game_configuration_selects_side_and_bounded_skill() {
     assert_eq!(game.engine_skill, 0);
 
     key(&mut game, KeyCode::Enter);
-    assert_eq!(game.take_new_game_request(), Some((HumanSide::Random, 0)));
+    assert_eq!(
+        game.take_new_game_request(),
+        Some((HumanSide::Random, 0, TimePreset::Unlimited))
+    );
     assert!(!game.configuring);
 }
 
@@ -2026,15 +2185,16 @@ fn rematch_key_restarts_with_same_configuration_after_game_over() {
 
     key(&mut game, KeyCode::Char('r'));
 
-    let (side, skill) = game
+    let (side, skill, time) = game
         .take_new_game_request()
         .expect("rematch requests a fresh game");
     assert_eq!(side, HumanSide::Random);
     assert_eq!(skill, 7);
+    assert_eq!(time, TimePreset::Unlimited);
     // The request drives the shared new-game path, which rebuilds a fresh game
     // while keeping the configured side and skill.
     let mut engine = None;
-    crate::start_configured_game(&mut engine, &mut game, side, skill);
+    crate::start_configured_game(&mut engine, &mut game, side, skill, time);
     assert_eq!(game.position, Chess::default());
     assert_eq!(game.config_side, HumanSide::Random);
     assert_eq!(game.engine_skill, 7);
@@ -2190,6 +2350,337 @@ fn resignation_local_renders_winner_headline() {
     let text = buffer_text(&terminal);
     assert!(text.contains("BLACK WINS"), "local resignation headline");
     assert!(text.contains("white resigns. black wins."), "reason line");
+}
+
+#[test]
+fn clock_preset_selection_navigates_and_requests() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    key(&mut game, KeyCode::Char('N'));
+    assert!(game.configuring);
+    assert!(!game.config_time_focused, "side/skill focus is the default");
+    // Existing side navigation still works without Tab.
+    key(&mut game, KeyCode::Right);
+    assert_eq!(game.config_side, HumanSide::Black);
+    key(&mut game, KeyCode::Tab);
+    assert!(game.config_time_focused, "Tab focuses the time control");
+    key(&mut game, KeyCode::Left);
+    assert_eq!(game.config_time, TimePreset::Rapid10_5);
+    key(&mut game, KeyCode::Right);
+    assert_eq!(game.config_time, TimePreset::Unlimited);
+    key(&mut game, KeyCode::Right);
+    assert_eq!(game.config_time, TimePreset::Blitz3_2);
+    key(&mut game, KeyCode::Right);
+    assert_eq!(game.config_time, TimePreset::Rapid5_3);
+    // While time is focused, Up/Down must not touch the skill.
+    let skill = game.engine_skill;
+    key(&mut game, KeyCode::Up);
+    assert_eq!(
+        game.engine_skill, skill,
+        "skill unchanged while time focused"
+    );
+    key(&mut game, KeyCode::Enter);
+    assert_eq!(
+        game.take_new_game_request(),
+        Some((HumanSide::Black, skill, TimePreset::Rapid5_3))
+    );
+}
+
+#[test]
+fn clock_preset_cancel_restores_previous_choice() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    game.config_time = TimePreset::Rapid5_3;
+    key(&mut game, KeyCode::Char('N'));
+    assert_eq!(game.config_time, TimePreset::Rapid5_3);
+    key(&mut game, KeyCode::Tab);
+    key(&mut game, KeyCode::Right);
+    assert_eq!(game.config_time, TimePreset::Rapid10_5);
+    key(&mut game, KeyCode::Esc);
+    assert!(!game.configuring);
+    assert_eq!(
+        game.config_time,
+        TimePreset::Rapid5_3,
+        "cancel restores choice"
+    );
+}
+
+#[test]
+fn clock_config_screen_shows_time_control() {
+    let mut game = Game::default();
+    game.open_new_game_config();
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    assert!(
+        text.contains("Time control"),
+        "config screen names the field"
+    );
+    assert!(text.contains("Unlimited"), "default choice shown");
+    assert!(text.contains("Tab: time control"), "navigation hint shown");
+}
+
+#[test]
+fn clock_only_active_side_decrements() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black); // human White to move
+    game.apply_time_control(TimePreset::Rapid5_3);
+    let t0 = Instant::now();
+    game.tick_clock_at(t0);
+    game.tick_clock_at(t0 + Duration::from_secs(2));
+    let clock = game.clock.as_ref().unwrap();
+    assert_eq!(clock.white, Duration::from_secs(298), "active side ticks");
+    assert_eq!(clock.black, Duration::from_secs(300), "idle side untouched");
+}
+
+#[test]
+fn clock_increment_applied_on_move_and_switches_side() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    game.apply_time_control(TimePreset::Rapid5_3);
+    let t0 = Instant::now();
+    game.tick_clock_at(t0);
+    game.tick_clock_at(t0 + Duration::from_secs(2));
+    game.cursor = Square::E2;
+    key(&mut game, KeyCode::Enter);
+    game.cursor = Square::E4;
+    key(&mut game, KeyCode::Enter);
+    assert_eq!(game.position.turn(), shakmaty::Color::Black);
+    let clock = game.clock.as_ref().unwrap();
+    assert_eq!(
+        clock.white,
+        Duration::from_secs(301),
+        "mover gained increment"
+    );
+    assert_eq!(
+        clock.black,
+        Duration::from_secs(300),
+        "new side starts full"
+    );
+    assert_eq!(game.ending(), None);
+}
+
+#[test]
+fn clock_exact_zero_ends_game_on_next_tick() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    game.apply_time_control(TimePreset::Rapid5_3);
+    game.clock.as_mut().unwrap().white = Duration::from_millis(400);
+    let t0 = Instant::now();
+    game.tick_clock_at(t0);
+    assert_eq!(game.timed_out, None, "anchor tick does not end the game");
+    game.tick_clock_at(t0 + Duration::from_millis(500));
+    assert_eq!(game.timed_out, Some(shakmaty::Color::White));
+    assert_eq!(
+        game.ending().as_deref(),
+        Some("white ran out of time. black wins.")
+    );
+    assert_eq!(game.clock.as_ref().unwrap().white, Duration::ZERO);
+}
+
+#[test]
+fn clock_no_leak_onto_human_during_engine_search() {
+    let mut game = position("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1");
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::Black;
+    game.apply_time_control(TimePreset::Rapid5_3);
+    assert!(game.engine_to_move());
+    let t0 = Instant::now();
+    game.tick_clock_at(t0);
+    game.tick_clock_at(t0 + Duration::from_secs(2));
+    let clock = game.clock.as_ref().unwrap();
+    assert_eq!(clock.black, Duration::from_secs(298), "engine clock ticks");
+    assert_eq!(clock.white, Duration::from_secs(300), "human clock frozen");
+}
+
+#[test]
+fn clock_no_leak_across_config_pause() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    game.apply_time_control(TimePreset::Rapid5_3);
+    let t0 = Instant::now();
+    game.tick_clock_at(t0);
+    game.tick_clock_at(t0 + Duration::from_secs(2));
+    assert_eq!(game.clock.as_ref().unwrap().white, Duration::from_secs(298));
+    game.open_new_game_config();
+    game.tick_clock_at(t0 + Duration::from_secs(7));
+    assert_eq!(
+        game.clock.as_ref().unwrap().white,
+        Duration::from_secs(298),
+        "config time is not charged"
+    );
+    assert_eq!(game.clock.as_ref().unwrap().black, Duration::from_secs(300));
+    game.cancel_new_game_config();
+    game.tick_clock_at(t0 + Duration::from_secs(7));
+    game.tick_clock_at(t0 + Duration::from_secs(9));
+    assert_eq!(
+        game.clock.as_ref().unwrap().white,
+        Duration::from_secs(296),
+        "resumed clock charges from the resume point"
+    );
+}
+
+#[test]
+fn clock_no_leak_across_promotion_pause() {
+    let mut game = position("4k3/P7/8/8/8/8/8/4K3 w - - 0 1");
+    game.apply_time_control(TimePreset::Rapid5_3);
+    let t0 = Instant::now();
+    game.tick_clock_at(t0);
+    game.tick_clock_at(t0 + Duration::from_secs(2));
+    assert_eq!(game.clock.as_ref().unwrap().white, Duration::from_secs(298));
+    game.cursor = Square::A7;
+    key(&mut game, KeyCode::Enter);
+    game.cursor = Square::A8;
+    key(&mut game, KeyCode::Enter);
+    assert!(!game.promotion.is_empty());
+    game.tick_clock_at(t0 + Duration::from_secs(7));
+    assert_eq!(
+        game.clock.as_ref().unwrap().white,
+        Duration::from_secs(298),
+        "promotion-chooser time is not charged"
+    );
+    key(&mut game, KeyCode::Char('q'));
+    assert_eq!(
+        game.clock.as_ref().unwrap().white,
+        Duration::from_secs(301),
+        "increment after promotion"
+    );
+    assert_eq!(game.clock.as_ref().unwrap().black, Duration::from_secs(300));
+    game.tick_clock_at(t0 + Duration::from_secs(7));
+    game.tick_clock_at(t0 + Duration::from_secs(9));
+    assert_eq!(
+        game.clock.as_ref().unwrap().black,
+        Duration::from_secs(298),
+        "black clock now runs"
+    );
+    assert_eq!(
+        game.clock.as_ref().unwrap().white,
+        Duration::from_secs(301),
+        "white untouched after move"
+    );
+}
+
+#[test]
+fn clock_timeout_versus_engine_renders_you_lose() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    game.apply_time_control(TimePreset::Rapid5_3);
+    game.clock.as_mut().unwrap().white = Duration::from_millis(100);
+    let t0 = Instant::now();
+    game.tick_clock_at(t0);
+    game.tick_clock_at(t0 + Duration::from_millis(200));
+    assert_eq!(game.timed_out, Some(shakmaty::Color::White));
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    assert!(text.contains("YOU LOSE"), "human timeout headline");
+    assert!(
+        text.contains("white ran out of time. black wins."),
+        "reason line"
+    );
+    assert_underlay(&text);
+}
+
+#[test]
+fn clock_timeout_local_attributes_winner() {
+    let mut game = Game::default();
+    game.apply_time_control(TimePreset::Rapid5_3);
+    game.clock.as_mut().unwrap().white = Duration::from_millis(100);
+    let t0 = Instant::now();
+    game.tick_clock_at(t0);
+    game.tick_clock_at(t0 + Duration::from_millis(200));
+    assert_eq!(
+        game.ending().as_deref(),
+        Some("white ran out of time. black wins.")
+    );
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    assert!(text.contains("BLACK WINS"), "local timeout headline");
+    assert!(
+        text.contains("white ran out of time. black wins."),
+        "reason line"
+    );
+}
+
+#[test]
+fn clock_display_renders_when_timed_and_hidden_when_unlimited() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    game.apply_time_control(TimePreset::Rapid5_3);
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    assert!(text.contains("Clocks"), "timed game shows the clock block");
+    assert!(text.contains("White 5:00"), "white clock displayed");
+    assert!(text.contains("Black 5:00"), "black clock displayed");
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &Game::default());
+    assert!(
+        !buffer_text(&terminal).contains("Clocks"),
+        "unlimited game hides the clock block"
+    );
+}
+
+#[test]
+fn clock_state_accessor_reports_remaining_and_increment() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    game.apply_time_control(TimePreset::Rapid5_3);
+    let state = game.clock_state().expect("timed game exposes state");
+    assert_eq!(state.white, Duration::from_secs(300));
+    assert_eq!(state.black, Duration::from_secs(300));
+    assert_eq!(state.increment, Duration::from_secs(3));
+    assert_eq!(state.side_to_move, shakmaty::Color::White);
+    assert_eq!(
+        Game::default().clock_state(),
+        None,
+        "unlimited has no state"
+    );
+}
+
+#[test]
+fn clock_switch_sides_restarts_timed_with_fresh_clocks() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    game.apply_time_control(TimePreset::Rapid5_3);
+    game.clock.as_mut().unwrap().white = Duration::from_secs(120);
+    game.switch_sides();
+    assert_eq!(game.engine_side, shakmaty::Color::White);
+    assert_eq!(game.config_time, TimePreset::Rapid5_3);
+    let clock = game.clock.as_ref().unwrap();
+    assert_eq!(
+        clock.white,
+        Duration::from_secs(300),
+        "clocks reset on side switch"
+    );
+    assert_eq!(clock.black, Duration::from_secs(300));
+}
+
+#[test]
+fn clock_restart_resets_from_selected_preset() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    game.apply_time_control(TimePreset::Rapid5_3);
+    game.clock.as_mut().unwrap().white = Duration::from_secs(10);
+    let mut engine = None;
+    crate::start_configured_game(
+        &mut engine,
+        &mut game,
+        HumanSide::White,
+        7,
+        TimePreset::Rapid10_5,
+    );
+    assert_eq!(game.config_time, TimePreset::Rapid10_5);
+    let clock = game.clock.as_ref().unwrap();
+    assert_eq!(
+        clock.white,
+        Duration::from_secs(600),
+        "clocks reset on restart"
+    );
+    assert_eq!(clock.black, Duration::from_secs(600));
+    assert_eq!(game.timed_out, None);
+}
+
+#[test]
+fn clock_unlimited_games_unaffected() {
+    let mut game = Game::default();
+    assert!(game.clock.is_none());
+    let t0 = Instant::now();
+    game.tick_clock_at(t0);
+    game.tick_clock_at(t0 + Duration::from_secs(60));
+    assert!(game.clock.is_none());
+    assert!(game.ending().is_none());
+    assert_eq!(game.timed_out, None);
 }
 
 #[test]
@@ -2606,6 +3097,6 @@ fn engine_accepts_skill_configuration_before_search() {
     unsafe { std::env::remove_var("FAKE_ENGINE_MODE") };
     let mut engine = Engine::spawn(Path::new(&fake_engine_path())).expect("spawn");
     engine.configure_skill(7).expect("configure skill");
-    engine.start_search(START_FEN).expect("search start");
+    engine.start_search(START_FEN, None).expect("search start");
     assert!(wait_bestmove(&mut engine, Duration::from_secs(2)).is_some());
 }

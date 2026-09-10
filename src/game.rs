@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::time::{Duration, Instant};
+
 use shakmaty::{Chess, Color, EnPassantMode, Move, Position, Square, fen::Fen, san::SanPlus};
 
 pub(crate) const MAX_SKILL: u16 = 20;
@@ -38,6 +40,112 @@ impl HumanSide {
     }
 }
 
+// A fixed timed-game choice: base minutes plus a per-move increment.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct TimeControl {
+    pub(crate) base: Duration,
+    pub(crate) increment: Duration,
+}
+
+impl TimeControl {
+    fn new(base_minutes: u64, increment_seconds: u64) -> Self {
+        Self {
+            base: Duration::from_secs(base_minutes * 60),
+            increment: Duration::from_secs(increment_seconds),
+        }
+    }
+}
+
+// The time-control choices offered on the new-game screen. Unlimited preserves
+// today's untimed behaviour; every timed preset pairs a base with an increment.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TimePreset {
+    Unlimited,
+    Blitz3_2,
+    Rapid5_3,
+    Rapid10_5,
+}
+
+impl TimePreset {
+    pub(crate) const ALL: [TimePreset; 4] = [
+        TimePreset::Unlimited,
+        TimePreset::Blitz3_2,
+        TimePreset::Rapid5_3,
+        TimePreset::Rapid10_5,
+    ];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Unlimited => "Unlimited",
+            Self::Blitz3_2 => "3+2",
+            Self::Rapid5_3 => "5+3",
+            Self::Rapid10_5 => "10+5",
+        }
+    }
+
+    pub(crate) fn time_control(self) -> Option<TimeControl> {
+        match self {
+            Self::Unlimited => None,
+            Self::Blitz3_2 => Some(TimeControl::new(3, 2)),
+            Self::Rapid5_3 => Some(TimeControl::new(5, 3)),
+            Self::Rapid10_5 => Some(TimeControl::new(10, 5)),
+        }
+    }
+
+    pub(crate) fn previous(self) -> Self {
+        let index = Self::ALL.iter().position(|p| *p == self).unwrap();
+        Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+
+    pub(crate) fn next(self) -> Self {
+        let index = Self::ALL.iter().position(|p| *p == self).unwrap();
+        Self::ALL[(index + 1) % Self::ALL.len()]
+    }
+}
+
+// The running per-side clocks of a timed game. `running` is the monotonic
+// anchor of the active side's clock: while the game is live it rolls forward
+// each tick; any pause (config screen, promotion chooser, a finished game)
+// clears it so no time accumulates across the pause.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Clock {
+    pub(crate) white: Duration,
+    pub(crate) black: Duration,
+    pub(crate) increment: Duration,
+    running: Option<Instant>,
+}
+
+impl Clock {
+    fn new(control: TimeControl) -> Self {
+        Self {
+            white: control.base,
+            black: control.base,
+            increment: control.increment,
+            running: None,
+        }
+    }
+
+    fn remaining_mut(&mut self, side: Color) -> &mut Duration {
+        match side {
+            Color::White => &mut self.white,
+            Color::Black => &mut self.black,
+        }
+    }
+}
+
+// A crate-visible snapshot of the running clock. The UCI time-control
+// integration reads this at the drive_engine call site to build wtime/btime
+// and winc/binc; `side_to_move` is whose clock is active.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ClockState {
+    pub(crate) white: Duration,
+    pub(crate) black: Duration,
+    /// Per-move increment both sides gain; the UCI wiring reads it for winc/binc.
+    #[allow(dead_code)]
+    pub(crate) increment: Duration,
+    pub(crate) side_to_move: Color,
+}
+
 pub(crate) struct Game {
     pub(crate) position: Chess,
     pub(crate) positions: Vec<Chess>,
@@ -55,9 +163,14 @@ pub(crate) struct Game {
     pub(crate) engine_failed: bool,
     pub(crate) configuring: bool,
     pub(crate) config_side: HumanSide,
+    pub(crate) config_time: TimePreset,
+    pub(crate) config_time_focused: bool,
     pub(crate) engine_skill: u16,
+    pub(crate) time_control: Option<TimeControl>,
+    pub(crate) clock: Option<Clock>,
+    pub(crate) timed_out: Option<Color>,
     pub(crate) new_game_requested: bool,
-    pub(crate) config_snapshot: Option<(HumanSide, u16)>,
+    pub(crate) config_snapshot: Option<(HumanSide, u16, TimePreset)>,
     pub(crate) captured_by_white: Vec<shakmaty::Role>,
     pub(crate) captured_by_black: Vec<shakmaty::Role>,
 }
@@ -82,7 +195,12 @@ impl Default for Game {
             engine_failed: false,
             configuring: false,
             config_side: HumanSide::White,
+            config_time: TimePreset::Unlimited,
+            config_time_focused: false,
             engine_skill: MAX_SKILL,
+            time_control: None,
+            clock: None,
+            timed_out: None,
             new_game_requested: false,
             config_snapshot: None,
             captured_by_white: Vec::new(),
@@ -132,6 +250,8 @@ impl Game {
             Some("Draw claimed.".into())
         } else if let Some(side) = self.resigned {
             Some(format!("{side} resigns. {} wins.", side.other()))
+        } else if let Some(side) = self.timed_out {
+            Some(format!("{side} ran out of time. {} wins.", side.other()))
         } else if self.position.halfmoves() >= 150 {
             Some("Draw: 75-move rule.".into())
         } else if self.repetitions(&self.position) >= 5 {
@@ -201,12 +321,20 @@ impl Game {
         }
         self.history
             .push(SanPlus::from_move(self.position.clone(), m).to_string());
+        let mover = self.position.turn();
         self.last_move = m.from().map(|from| (from, destination(m)));
         self.position.play_unchecked(m);
         self.positions.push(self.position.clone());
         self.selected = None;
         self.promotion.clear();
         self.notice.clear();
+        // The mover gains the increment; the opponent's clock anchor is cleared
+        // so the next tick starts it fresh, never double-counting the switch.
+        if let Some(clock) = self.clock.as_mut() {
+            let increment = clock.increment;
+            *clock.remaining_mut(mover) += increment;
+            clock.running = None;
+        }
     }
 
     pub(crate) fn select(&mut self) {
@@ -291,15 +419,17 @@ impl Game {
     }
 
     pub(crate) fn open_new_game_config(&mut self) {
-        self.config_snapshot = Some((self.config_side, self.engine_skill));
+        self.config_snapshot = Some((self.config_side, self.engine_skill, self.config_time));
         self.configuring = true;
         self.new_game_requested = false;
+        self.config_time_focused = false;
     }
 
     pub(crate) fn cancel_new_game_config(&mut self) {
-        if let Some((side, skill)) = self.config_snapshot.take() {
+        if let Some((side, skill, time)) = self.config_snapshot.take() {
             self.config_side = side;
             self.engine_skill = skill;
+            self.config_time = time;
         }
         self.configuring = false;
     }
@@ -310,10 +440,10 @@ impl Game {
         self.new_game_requested = true;
     }
 
-    pub(crate) fn take_new_game_request(&mut self) -> Option<(HumanSide, u16)> {
+    pub(crate) fn take_new_game_request(&mut self) -> Option<(HumanSide, u16, TimePreset)> {
         self.new_game_requested.then(|| {
             self.new_game_requested = false;
-            (self.config_side, self.engine_skill)
+            (self.config_side, self.engine_skill, self.config_time)
         })
     }
 
@@ -327,8 +457,62 @@ impl Game {
 
     pub(crate) fn switch_sides(&mut self) {
         let skill = self.engine_skill;
+        let time = self.config_time;
         *self = Self::new_vs_engine(!self.engine_side);
         self.engine_skill = skill;
+        self.apply_time_control(time);
+    }
+
+    /// Adopt `time` as the game's time control, resetting the clocks. Unlimited
+    /// keeps the game untimed.
+    pub(crate) fn apply_time_control(&mut self, time: TimePreset) {
+        self.config_time = time;
+        self.time_control = time.time_control();
+        self.clock = self.time_control.map(Clock::new);
+    }
+
+    /// Charge the active side's clock for wall time since the last tick. The
+    /// clock only runs while the side to move is actually playing: the config
+    /// screen, the promotion chooser, and a finished game pause it so no time
+    /// leaks across those waits.
+    pub(crate) fn tick_clock(&mut self) {
+        self.tick_clock_at(Instant::now());
+    }
+
+    pub(crate) fn tick_clock_at(&mut self, now: Instant) {
+        if self.clock.is_none() {
+            return;
+        }
+        let paused = self.configuring || self.ending().is_some() || !self.promotion.is_empty();
+        let side = self.position.turn();
+        let clock = self.clock.as_mut().unwrap();
+        if paused {
+            clock.running = None;
+            return;
+        }
+        let delta = clock
+            .running
+            .map(|start| now.saturating_duration_since(start))
+            .unwrap_or(Duration::ZERO);
+        let remaining = clock.remaining_mut(side);
+        if delta > Duration::ZERO {
+            *remaining = remaining.saturating_sub(delta);
+            if *remaining == Duration::ZERO {
+                self.timed_out = Some(side);
+            }
+        }
+        clock.running = Some(now);
+    }
+
+    /// Snapshot of the running clocks for the UCI time-control integration.
+    pub(crate) fn clock_state(&self) -> Option<ClockState> {
+        let clock = self.clock.as_ref()?;
+        Some(ClockState {
+            white: clock.white,
+            black: clock.black,
+            increment: clock.increment,
+            side_to_move: self.position.turn(),
+        })
     }
 
     /// Request a fresh game with the current configuration. The restart runs

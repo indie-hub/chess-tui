@@ -8,6 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 use shakmaty::{Color as Side, Move, Position, Role, Square};
+use std::time::Duration;
 
 use crate::game::{Game, destination};
 use crate::sprites::{SPRITE_SIZE, sprite_pixels};
@@ -266,6 +267,53 @@ fn marker_span(color: [u8; 3]) -> Span<'static> {
     Span::styled(" ", Style::default().fg(to_rgb(color)).bg(to_rgb(color)))
 }
 
+// The per-side clocks in a timed game, displayed below the material block. The
+// active side's line is drawn in the cursor-accent colour so the running clock
+// reads at a glance; the block only appears in timed games.
+fn draw_clock(frame: &mut Frame, game: &Game) {
+    let Some(state) = game.clock_state() else {
+        return;
+    };
+    let line = |side: Side| {
+        let on = side == state.side_to_move;
+        let remaining = if side == Side::White {
+            state.white
+        } else {
+            state.black
+        };
+        Span::styled(
+            format!(
+                "{} {}",
+                if side == Side::White {
+                    "White"
+                } else {
+                    "Black"
+                },
+                format_duration(remaining)
+            ),
+            Style::default().fg(if on {
+                to_rgb(CURSOR_OUTLINE)
+            } else {
+                to_rgb(RESULT_BODY_FG)
+            }),
+        )
+    };
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(vec![line(Side::White)]),
+            Line::from(vec![line(Side::Black)]),
+        ])
+        .block(Block::default().title(" Clocks ").borders(Borders::ALL)),
+        Rect::new(PANEL_X, MATERIAL_Y + MATERIAL_H + 1, PANEL_WIDTH, 4),
+    );
+}
+
+// Compact mm:ss display for a clock value.
+fn format_duration(d: Duration) -> String {
+    let total = d.as_secs();
+    format!("{}:{:02}", total / 60, total % 60)
+}
+
 // Build one square as 8 lines of 16 cells. Decoration precedence is: the
 // selected square gets a full gold outline, a capturable destination gets a
 // thin amber outline (the piece stays exact inside), an empty legal
@@ -452,6 +500,11 @@ fn draw_new_game_config(frame: &mut Frame, game: &Game) {
         width,
         height,
     );
+    let hint = if game.config_time_focused {
+        "Tab: side/skill    Left/right: time control"
+    } else {
+        "Tab: time control    Left/right: side    Up/down: skill (0-20)"
+    };
     let text = vec![
         Line::from(""),
         Line::from(vec![
@@ -469,8 +522,16 @@ fn draw_new_game_config(frame: &mut Frame, game: &Game) {
                 Style::default().fg(Color::Rgb(255, 210, 40)),
             ),
         ]),
+        Line::from(vec![
+            Span::raw("Time control   < "),
+            Span::styled(
+                game.config_time.label(),
+                Style::default().fg(Color::Rgb(60, 200, 60)),
+            ),
+            Span::raw(" >"),
+        ]),
         Line::from(""),
-        Line::from("Left/right: side    Up/down: skill (0-20)"),
+        Line::from(hint),
         Line::from("Enter: start game    Esc: cancel"),
     ];
     frame.render_widget(
@@ -481,13 +542,15 @@ fn draw_new_game_config(frame: &mut Frame, game: &Game) {
     );
 }
 
-// The end-of-game headline plus its accent colour. A checkmate or resignation
-// names a winner; every other ending is a draw. Versus the engine the human
-// side is engine_side.other(), so the headline is first-person; in local
-// two-player play the winning colour is named instead.
+// The end-of-game headline plus its accent colour. A checkmate, resignation,
+// or timeout names a winner; every other ending is a draw. Versus the engine
+// the human side is engine_side.other(), so the headline is first-person; in
+// local two-player play the winning colour is named instead.
 fn result_headline(game: &Game) -> (&'static str, [u8; 3]) {
     let winner = if let Some(resigner) = game.resigned {
         Some(resigner.other())
+    } else if let Some(loser) = game.timed_out {
+        Some(loser.other())
     } else if game.position.is_checkmate() {
         Some(!game.position.turn())
     } else {
@@ -590,6 +653,7 @@ pub(crate) fn draw(frame: &mut Frame, game: &Game) {
     draw_board(frame, game, &legal);
     draw_panel(frame, game);
     draw_material(frame, game);
+    draw_clock(frame, game);
     draw_result(frame, game);
     // Footer is at most two lines: one compact controls+legend line and a
     // dynamic line. The dynamic line shows the draw-availability hint only

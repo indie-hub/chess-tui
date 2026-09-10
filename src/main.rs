@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use engine::Engine;
-use game::{Game, HumanSide};
+use game::{Game, HumanSide, TimePreset};
 use render::{MIN_HEIGHT, MIN_WIDTH, draw};
 use shakmaty::{Color as Side, uci::UciMove};
 
@@ -38,6 +38,7 @@ fn start_configured_game(
     game: &mut Game,
     choice: HumanSide,
     skill: u16,
+    time: TimePreset,
 ) {
     let random_white = random_coin_flip();
     let human_side = resolve_human_side(choice, random_white);
@@ -47,6 +48,7 @@ fn start_configured_game(
                 *game = Game::new_vs_engine(!human_side);
                 game.config_side = choice;
                 game.engine_skill = skill;
+                game.apply_time_control(time);
             }
             Err(err) => {
                 *game = Game {
@@ -56,6 +58,7 @@ fn start_configured_game(
                     engine_skill: skill,
                     ..Game::default()
                 };
+                game.apply_time_control(time);
             }
         }
     } else {
@@ -65,6 +68,7 @@ fn start_configured_game(
             engine_skill: skill,
             ..Game::default()
         };
+        game.apply_time_control(time);
     }
 }
 
@@ -91,7 +95,7 @@ fn drive_engine(engine: &mut Engine, game: &mut Game) {
             // cancel it so a stale bestmove can never be applied.
             engine.reset();
         }
-        if let Err(err) = engine.start_search(&fen) {
+        if let Err(err) = engine.start_search(&fen, game.clock_state()) {
             game.engine_failed = true;
             game.engine_status = format!("Engine error: {}", err.message());
             return;
@@ -154,6 +158,7 @@ fn main() -> io::Result<()> {
             if let Some(engine) = engine.as_mut() {
                 drive_engine(engine, &mut game);
             }
+            game.tick_clock();
             if event::poll(Duration::from_millis(50))?
                 && let Event::Key(key) = event::read()?
             {
@@ -170,8 +175,8 @@ fn main() -> io::Result<()> {
                     if game.key(key) {
                         return Ok(());
                     }
-                    if let Some((side, skill)) = game.take_new_game_request() {
-                        start_configured_game(&mut engine, &mut game, side, skill);
+                    if let Some((side, skill, time)) = game.take_new_game_request() {
+                        start_configured_game(&mut engine, &mut game, side, skill, time);
                     }
                 }
             }

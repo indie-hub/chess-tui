@@ -12,10 +12,52 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::game::ClockState;
+
 pub(crate) const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const READY_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const SEARCH_TIMEOUT: Duration = Duration::from_secs(10);
 const MOVE_TIME_MS: u32 = 1000;
+// A timed search may legitimately think until its clock runs low, so its
+// watchdog allows the side to move's remaining time plus its increment plus a
+// fixed overhead margin. The cap keeps a genuinely hung engine flagged in
+// bounded time even when the clock is large (a 10+5 preset starts at 600s).
+const TIMED_SEARCH_MARGIN: Duration = Duration::from_secs(2);
+const MAX_TIMED_SEARCH_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The watchdog timeout for a search: the fixed 10s ceiling for movetime
+/// (unlimited) searches, unchanged; for a timed search the side to move's
+/// remaining time plus its increment plus a fixed overhead margin, capped at a
+/// sane upper bound so a hung engine is still caught promptly.
+pub(crate) fn watchdog_timeout(clock: Option<ClockState>) -> Duration {
+    match clock {
+        Some(state) => {
+            let remaining = match state.side_to_move {
+                shakmaty::Color::White => state.white,
+                shakmaty::Color::Black => state.black,
+            };
+            (remaining + state.increment + TIMED_SEARCH_MARGIN).min(MAX_TIMED_SEARCH_TIMEOUT)
+        }
+        None => SEARCH_TIMEOUT,
+    }
+}
+
+// The exact UCI go command for a search: a fixed movetime for unlimited play,
+// real per-side clocks when a time control is in force. wtime/btime are always
+// White/Black absolute remaining milliseconds (never swapped by side_to_move)
+// and winc/binc are the shared increment, both in whole milliseconds.
+pub(crate) fn go_command(clock: Option<ClockState>) -> String {
+    match clock {
+        Some(state) => format!(
+            "go wtime {} btime {} winc {} binc {}",
+            state.white.as_millis(),
+            state.black.as_millis(),
+            state.increment.as_millis(),
+            state.increment.as_millis()
+        ),
+        None => format!("go movetime {MOVE_TIME_MS}"),
+    }
+}
 
 #[derive(Debug)]
 pub(crate) enum EngineError {
@@ -46,8 +88,12 @@ pub(crate) struct Engine {
     rx: Receiver<String>,
     searching: bool,
     search_start: Option<Instant>,
+    search_timeout: Duration,
     info_lines: Vec<String>,
     last_fen: Option<String>,
+    /// The exact go command last sent, retained for the integration tests.
+    #[allow(dead_code)]
+    last_go: Option<String>,
 }
 
 // Locate the engine in this order: a non-empty STOCKFISH_PATH override, an
@@ -149,8 +195,10 @@ impl Engine {
             rx,
             searching: false,
             search_start: None,
+            search_timeout: SEARCH_TIMEOUT,
             info_lines: Vec::new(),
             last_fen: None,
+            last_go: None,
         };
         engine.init()?;
         Ok(engine)
@@ -197,15 +245,30 @@ impl Engine {
     }
 
     // Send the current position and ask the engine to search. The search runs
-    // asynchronously; results arrive via try_bestmove().
-    pub(crate) fn start_search(&mut self, fen: &str) -> Result<(), EngineError> {
+    // asynchronously; results arrive via try_bestmove(). A timed game passes
+    // its clock state so the engine receives real per-side times; unlimited
+    // play keeps the fixed movetime.
+    pub(crate) fn start_search(
+        &mut self,
+        fen: &str,
+        clock: Option<ClockState>,
+    ) -> Result<(), EngineError> {
+        let cmd = go_command(clock);
         self.send(&format!("position fen {fen}"))?;
-        self.send(&format!("go movetime {MOVE_TIME_MS}"))?;
+        self.send(&cmd)?;
         self.searching = true;
         self.search_start = Some(Instant::now());
+        self.search_timeout = watchdog_timeout(clock);
         self.info_lines.clear();
         self.last_fen = Some(fen.to_string());
+        self.last_go = Some(cmd);
         Ok(())
+    }
+
+    /// The exact go command sent by the most recent start_search.
+    #[allow(dead_code)]
+    pub(crate) fn last_go(&self) -> Option<&str> {
+        self.last_go.as_deref()
     }
 
     // Cancel a pending search and discard its output (used on restart and before
@@ -240,7 +303,7 @@ impl Engine {
         self.searching
             && self
                 .search_start
-                .is_some_and(|start| start.elapsed() > SEARCH_TIMEOUT)
+                .is_some_and(|start| start.elapsed() > self.search_timeout)
     }
 
     // Drain the engine's output without blocking. Returns the bestmove when it
