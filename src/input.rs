@@ -40,6 +40,11 @@ impl Game {
             }
             return false;
         }
+        // A same-settings rematch is offered only after the game has ended.
+        if key.code == KeyCode::Char('r') && self.ending().is_some() {
+            self.rematch();
+            return false;
+        }
         // On the engine's turn only cursor, quit, restart and side-switch are
         // accepted; piece-selection, promotion and draw keys stay blocked.
         if self.engine_to_move()

@@ -2016,6 +2016,94 @@ fn new_game_configuration_renders_and_can_be_cancelled() {
 }
 
 #[test]
+fn rematch_key_restarts_with_same_configuration_after_game_over() {
+    let mut game = position(WHITE_MATES_FEN);
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::Black;
+    game.config_side = HumanSide::Random;
+    game.engine_skill = 7;
+    assert!(game.ending().is_some());
+
+    key(&mut game, KeyCode::Char('r'));
+
+    let (side, skill) = game
+        .take_new_game_request()
+        .expect("rematch requests a fresh game");
+    assert_eq!(side, HumanSide::Random);
+    assert_eq!(skill, 7);
+    // The request drives the shared new-game path, which rebuilds a fresh game
+    // while keeping the configured side and skill.
+    let mut engine = None;
+    crate::start_configured_game(&mut engine, &mut game, side, skill);
+    assert_eq!(game.position, Chess::default());
+    assert_eq!(game.config_side, HumanSide::Random);
+    assert_eq!(game.engine_skill, 7);
+    assert!(game.ending().is_none());
+}
+
+#[test]
+fn rematch_key_is_inert_before_game_over() {
+    let mut game = Game::new_vs_engine(shakmaty::Color::Black);
+    game.config_side = HumanSide::White;
+    game.engine_skill = 5;
+    let before = game.position.clone();
+    assert!(game.ending().is_none());
+
+    key(&mut game, KeyCode::Char('r'));
+
+    assert_eq!(game.take_new_game_request(), None, "no restart mid-game");
+    assert_eq!(game.position, before);
+    assert_eq!(game.config_side, HumanSide::White);
+    assert_eq!(game.engine_skill, 5);
+}
+
+#[test]
+fn rematch_key_does_not_shadow_rook_promotion() {
+    let mut game = position("4k3/P7/8/8/8/8/8/4K3 w - - 0 1");
+    choose(&mut game, Square::A7, Square::A8);
+    assert_eq!(game.promotion.len(), 4);
+
+    key(&mut game, KeyCode::Char('r'));
+
+    assert_eq!(
+        game.position.board().piece_at(Square::A8).unwrap().role,
+        Role::Rook
+    );
+    assert_eq!(game.history.len(), 1);
+    assert_eq!(game.take_new_game_request(), None);
+}
+
+#[test]
+fn post_game_keys_remain_functional_at_game_over() {
+    // s: swap sides and restart, keeping the skill.
+    let mut game = position(WHITE_MATES_FEN);
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::Black;
+    game.engine_skill = 7;
+    key(&mut game, KeyCode::Char('s'));
+    assert_eq!(game.position, Chess::default());
+    assert_eq!(game.engine_side, shakmaty::Color::White);
+    assert_eq!(game.engine_skill, 7);
+
+    // n / N: open the new-game configuration screen.
+    for open in [KeyCode::Char('n'), KeyCode::Char('N')] {
+        let mut game = position(WHITE_MATES_FEN);
+        game.versus_engine = true;
+        game.engine_side = shakmaty::Color::Black;
+        key(&mut game, open);
+        assert!(
+            game.configuring,
+            "{open:?} opens configuration at game over"
+        );
+    }
+
+    // q: quit.
+    let mut game = position(WHITE_MATES_FEN);
+    game.versus_engine = true;
+    assert!(key(&mut game, KeyCode::Char('q')));
+}
+
+#[test]
 fn result_overlay_you_win_when_human_checkmates_engine() {
     let mut game = position(WHITE_MATES_FEN);
     game.versus_engine = true;
@@ -2341,6 +2429,48 @@ fn result_popup_paints_distinct_background_and_legible_body() {
         x += 1;
     }
     assert!(border_glyphs > 0, "no top-border glyph found for the popup");
+}
+
+#[test]
+fn result_popup_names_all_post_game_actions() {
+    let mut game = position(WHITE_MATES_FEN);
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::Black;
+    assert!(game.position.is_checkmate());
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    for action in ["r rematch", "s sides", "n new", "q quit"] {
+        assert!(
+            text.contains(action),
+            "popup must name the post-game action {action:?}"
+        );
+    }
+    // Exhaustive sweep of the popup rect, in the shape the popup-over-board
+    // convention requires: every cell carries only a popup glyph on the popup
+    // background, and the negative control -- a board sprite half-block -- must
+    // never survive the Clear underneath the overlay. A spot-check on the legend
+    // row alone would miss a leak in the untouched cells around it.
+    let buffer = terminal.backend().buffer();
+    let popup_x = BOARD_X + ((BOARD_CELLS_W - RESULT_POPUP_W) / 2 / SQUARE_W) * SQUARE_W;
+    let popup_y = BOARD_Y + ((BOARD_CELLS_H - RESULT_POPUP_H) / 2 / SQUARE_H) * SQUARE_H;
+    let popup_bg = Color::Rgb(RESULT_BG[0], RESULT_BG[1], RESULT_BG[2]);
+    let mut legend_glyphs = 0usize;
+    for y in popup_y..(popup_y + RESULT_POPUP_H) {
+        for x in popup_x..(popup_x + RESULT_POPUP_W) {
+            let cell = &buffer[(x, y)];
+            let symbol = cell.symbol();
+            assert_eq!(cell.bg, popup_bg, "popup background at ({x},{y})");
+            assert_ne!(
+                symbol, "▀",
+                "board sprite glyph leaked into popup at ({x},{y})"
+            );
+            if symbol.chars().all(|c| c.is_ascii_graphic()) {
+                legend_glyphs += 1;
+            }
+        }
+    }
+    assert!(legend_glyphs > 0, "action legend rendered");
 }
 
 #[test]

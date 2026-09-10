@@ -55,7 +55,8 @@ pub(crate) const RESULT_BODY_FG: [u8; 3] = [235, 235, 235];
 // and its top-left corner is placed on a square boundary, so every edge lands
 // exactly on a square edge: each square is either fully inside or fully outside
 // the popup, never bisected. The 30-column interior fits the longest possible
-// reason string ('Draw: insufficient material.', 28 chars) on one line.
+// reason string ('Draw: insufficient material.', 28 chars) on one line, and the
+// post-game action legend ('r rematch s sides n new q quit', 30 chars) exactly.
 pub(crate) const RESULT_POPUP_W: u16 = SQUARE_W * 2;
 pub(crate) const RESULT_POPUP_H: u16 = SQUARE_H;
 
@@ -529,6 +530,7 @@ fn draw_result(frame: &mut Frame, game: &Game) {
             Style::default().fg(to_rgb(color)),
         )]),
         Line::from(reason),
+        Line::from("r rematch s sides n new q quit"),
         Line::from(""),
     ];
     // Style-only overlays recolour cells but leave whatever board glyph a cell

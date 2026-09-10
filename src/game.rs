@@ -309,6 +309,13 @@ impl Game {
         self.engine_skill = skill;
     }
 
+    /// Request a fresh game with the current configuration. The restart runs
+    /// through the shared new-game path, so a `Random` human side is
+    /// re-resolved by the coin flip.
+    pub(crate) fn rematch(&mut self) {
+        self.new_game_requested = true;
+    }
+
     pub(crate) fn to_fen(&self) -> String {
         Fen::from_position(&self.position, EnPassantMode::Legal).to_string()
     }
