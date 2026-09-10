@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-09-10
+
+### Added
+
+- Resign: press `g` at any point during a game (even on the engine's turn,
+  or with the promotion chooser open) to resign. In Stockfish games this
+  always resigns the human side; in local two-player it resigns whoever is
+  to move. The result popup and footer report the winner the same way a
+  checkmate does (`YOU WIN`/`YOU LOSE` or `WHITE WINS`/`BLACK WINS`), rather
+  than the draw the game previously assumed for any non-checkmate ending.
+
 ## [0.3.0] - 2026-09-10
 
 ### Added
