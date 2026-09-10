@@ -47,6 +47,7 @@ pub(crate) struct Game {
     pub(crate) promotion: Vec<Move>,
     pub(crate) last_move: Option<(Square, Square)>,
     pub(crate) claimed: bool,
+    pub(crate) resigned: Option<Color>,
     pub(crate) notice: String,
     pub(crate) versus_engine: bool,
     pub(crate) engine_side: Color,
@@ -73,6 +74,7 @@ impl Default for Game {
             promotion: Vec::new(),
             last_move: None,
             claimed: false,
+            resigned: None,
             notice: "White: light pieces. Black: dark pieces.".into(),
             versus_engine: false,
             engine_side: Color::Black,
@@ -128,6 +130,8 @@ impl Game {
             Some("Draw: insufficient material.".into())
         } else if self.claimed {
             Some("Draw claimed.".into())
+        } else if let Some(side) = self.resigned {
+            Some(format!("{side} resigns. {} wins.", side.other()))
         } else if self.position.halfmoves() >= 150 {
             Some("Draw: 75-move rule.".into())
         } else if self.repetitions(&self.position) >= 5 {
@@ -249,6 +253,24 @@ impl Game {
         } else {
             self.notice = "No draw claim here or after the selected move.".into();
         }
+    }
+
+    /// End the game in the resigning side's opponent's favour. Versus the
+    /// engine the human always resigns, since there is no engine resign path;
+    /// in local play the side to move resigns. Ignored once the game has ended.
+    pub(crate) fn resign(&mut self) {
+        if self.ending().is_some() {
+            return;
+        }
+        let side = if self.versus_engine {
+            self.engine_side.other()
+        } else {
+            self.position.turn()
+        };
+        self.resigned = Some(side);
+        self.selected = None;
+        self.promotion.clear();
+        self.notice.clear();
     }
 
     pub(crate) fn new_vs_engine(engine_side: Color) -> Self {

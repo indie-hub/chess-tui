@@ -45,8 +45,9 @@ impl Game {
             self.rematch();
             return false;
         }
-        // On the engine's turn only cursor, quit, restart and side-switch are
-        // accepted; piece-selection, promotion and draw keys stay blocked.
+        // On the engine's turn only cursor, quit, restart, side-switch and
+        // resign are accepted; piece-selection, promotion and draw keys stay
+        // blocked.
         if self.engine_to_move()
             && !matches!(
                 key.code,
@@ -54,9 +55,16 @@ impl Game {
                     | KeyCode::Right
                     | KeyCode::Up
                     | KeyCode::Down
-                    | KeyCode::Char('h' | 'j' | 'k' | 'l' | 'q' | 'N' | 's')
+                    | KeyCode::Char('h' | 'j' | 'k' | 'l' | 'q' | 'N' | 's' | 'g')
             )
         {
+            return false;
+        }
+        // Resign is a mid-game action, so it stays available while choosing a
+        // promotion, mirroring the draw claim; it is a no-op once the game has
+        // ended.
+        if key.code == KeyCode::Char('g') {
+            self.resign();
             return false;
         }
         if key.code == KeyCode::Esc {

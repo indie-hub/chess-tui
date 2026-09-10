@@ -481,20 +481,27 @@ fn draw_new_game_config(frame: &mut Frame, game: &Game) {
     );
 }
 
-// The end-of-game headline plus its accent colour. Any non-checkmate ending is
-// a draw; a checkmate names the side that delivered it. Versus the engine the
-// human side is engine_side.other(), so the headline is first-person; in local
+// The end-of-game headline plus its accent colour. A checkmate or resignation
+// names a winner; every other ending is a draw. Versus the engine the human
+// side is engine_side.other(), so the headline is first-person; in local
 // two-player play the winning colour is named instead.
 fn result_headline(game: &Game) -> (&'static str, [u8; 3]) {
-    if !game.position.is_checkmate() {
+    let winner = if let Some(resigner) = game.resigned {
+        Some(resigner.other())
+    } else if game.position.is_checkmate() {
+        Some(!game.position.turn())
+    } else {
+        None
+    };
+    let Some(winner) = winner else {
         return ("DRAW", RESULT_DRAW);
-    }
-    let winner = !game.position.turn();
+    };
     if !game.versus_engine {
-        if winner == Side::White {
-            return ("WHITE WINS", RESULT_WIN);
-        }
-        return ("BLACK WINS", RESULT_WIN);
+        return if winner == Side::White {
+            ("WHITE WINS", RESULT_WIN)
+        } else {
+            ("BLACK WINS", RESULT_WIN)
+        };
     }
     if winner == game.engine_side.other() {
         ("YOU WIN", RESULT_WIN)
@@ -589,7 +596,7 @@ pub(crate) fn draw(frame: &mut Frame, game: &Game) {
     // when a draw claim is live and no other feedback is pending.
     frame.render_widget(
         Paragraph::new(
-            "Arrows/hjkl cursor  Enter move  Esc cancel  n configure  s sides  d draw  q quit | corners=cursor gold=selected green=legal amber=capture blue=last",
+            "Arrows/hjkl cursor  Enter move  Esc cancel  n configure  s sides  g resign  d draw  q quit | corners=cursor gold=selected green=legal amber=capture blue=last",
         ),
         Rect::new(1, 66, full, 1),
     );

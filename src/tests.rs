@@ -2104,6 +2104,95 @@ fn post_game_keys_remain_functional_at_game_over() {
 }
 
 #[test]
+fn resign_versus_engine_resigns_human_side_and_reports_loss() {
+    let mut game = position(START_FEN);
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::Black; // human plays White
+    assert!(!game.engine_to_move());
+
+    key(&mut game, KeyCode::Char('g'));
+
+    assert_eq!(game.ending().as_deref(), Some("white resigns. black wins."));
+    assert_eq!(game.resigned, Some(shakmaty::Color::White));
+}
+
+#[test]
+fn resign_works_while_engine_to_move() {
+    let mut game = position("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1");
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::Black; // human plays White, engine to move
+    assert!(game.engine_to_move());
+
+    key(&mut game, KeyCode::Char('g'));
+
+    assert_eq!(game.ending().as_deref(), Some("white resigns. black wins."));
+}
+
+#[test]
+fn resign_versus_engine_human_black_reports_win() {
+    let mut game = position(START_FEN);
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::White; // human plays Black, engine to move
+
+    key(&mut game, KeyCode::Char('g'));
+
+    assert_eq!(game.ending().as_deref(), Some("black resigns. white wins."));
+    assert_eq!(game.resigned, Some(shakmaty::Color::Black));
+}
+
+#[test]
+fn resign_local_two_player_uses_side_to_move() {
+    let mut game = Game::default();
+    assert_eq!(game.position.turn(), shakmaty::Color::White);
+
+    key(&mut game, KeyCode::Char('g'));
+
+    assert_eq!(game.ending().as_deref(), Some("white resigns. black wins."));
+    assert_eq!(game.resigned, Some(shakmaty::Color::White));
+}
+
+#[test]
+fn resign_is_inert_after_game_ends() {
+    let mut game = position(WHITE_MATES_FEN);
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::Black;
+    let ending = game.ending().unwrap();
+    let position = game.position.clone();
+
+    key(&mut game, KeyCode::Char('g'));
+
+    assert_eq!(game.ending().unwrap(), ending);
+    assert_eq!(game.resigned, None);
+    assert_eq!(game.position, position);
+}
+
+#[test]
+fn resignation_renders_result_overlay_and_footer_hint() {
+    let mut game = position(START_FEN);
+    game.versus_engine = true;
+    game.engine_side = shakmaty::Color::Black; // human plays White
+    key(&mut game, KeyCode::Char('g'));
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    assert!(text.contains("YOU LOSE"), "human resignation headline");
+    assert!(text.contains("white resigns. black wins."), "reason line");
+    assert!(text.contains("g resign"), "footer names the resign key");
+    assert_underlay(&text);
+}
+
+#[test]
+fn resignation_local_renders_winner_headline() {
+    let mut game = Game::default();
+    key(&mut game, KeyCode::Char('g'));
+    let mut terminal = Terminal::new(TestBackend::new(MIN_WIDTH, MIN_HEIGHT)).unwrap();
+    draw_terminal(&mut terminal, &game);
+    let text = buffer_text(&terminal);
+    assert!(text.contains("BLACK WINS"), "local resignation headline");
+    assert!(text.contains("white resigns. black wins."), "reason line");
+}
+
+#[test]
 fn result_overlay_you_win_when_human_checkmates_engine() {
     let mut game = position(WHITE_MATES_FEN);
     game.versus_engine = true;
